@@ -1,0 +1,2 @@
+"""ZhihuRec backend application package."""
+

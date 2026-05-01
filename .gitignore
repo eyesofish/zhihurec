@@ -1,0 +1,56 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+
+# Frontend dependencies and build output
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.next/
+frontend/coverage/
+
+# Local runtime state
+*.log
+logs/
+*.pid
+*.sqlite
+*.sqlite3
+*.db
+
+# ZhihuRec source data and downloaded archives
+# Keep scripts/docs/schema in git, but do not commit large local datasets.
+/data/zhihurec_1m/raw/
+/data/zhihurec_1m/meta/tmp_download/
+
+# Generated offline build artifacts and import packages
+/build/demo_world/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/

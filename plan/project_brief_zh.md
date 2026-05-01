@@ -65,6 +65,77 @@
 - 数据分析叙事框架
 - 面试中的项目讲述
 
+### Progressive Logic of the Project
+
+为了避免这个项目在表达上停留于“search 比 click 更重要”，这里需要把递进逻辑写清楚：
+
+> conceptually large, operationally small
+
+也就是：
+
+> 叙事可以开大，但第一版工程改动必须做小、做稳、做得可验证
+
+Our project follows a progressive logic from problem framing to minimal implementation.
+
+#### Step 1: Problem Framing
+
+We treat feed-to-search transition as a potential signal that the current recommendation state fails to satisfy the user's immediate intent.
+
+换句话说：
+
+- 用户从刷推荐转向主动搜索，不只是说明兴趣更强
+- 也可能说明当前推荐流没有满足他此刻的具体需求
+
+#### Step 2: Mechanism Hypothesis
+
+This transition is modeled as a possible mode shift from passive consumption to active intent resolution.
+
+也就是说：
+
+- 我们不只是把 search 当作比 click 更强的信号
+- 而是把这种行为看作用户状态的一次切换
+- 用户可能从“随便刷刷”的被动消费模式，切到“我要解决一个具体问题”的主动意图模式
+
+#### Step 3: System Implication
+
+In principle, such a transition should affect both retrieval seed policy and user representation, since the system may need to move away from a recommendation state dominated by long-term preference.
+
+这一步的含义是：
+
+- 从系统设计上说，这种状态切换最终不应只影响一个权重
+- 它原则上应同时影响召回 seed 的选择方式，以及用户表征的解释方式
+- 因为系统可能需要暂时偏离“长期兴趣主导”的推荐状态，转而响应用户的即时任务
+
+#### Step 4: Minimal First-Step Implementation
+
+For the first implementation, we do not fully reconstruct the user model.
+Instead, we only make a minimal intervention in retrieval seed selection:
+
+- downweight shallow click-based seeds
+- upweight search-aligned seeds
+
+这就是第一版最小落地点：
+
+- 降低浅层 click item 作为召回 seed 的权重
+- 提高与近期 search 更对齐的 item 作为召回 seed 的权重
+
+We start from retrieval seed selection because it is the smallest controllable intervention point.
+It allows us to test whether feed-to-search transition carries useful corrective information,
+without immediately introducing the complexity of rebuilding the entire user representation.
+
+这一步的重要性在于：
+
+- 它解释了为什么项目叙事可以讨论更大的系统问题
+- 但第一刀实现只改一个很小的、可控的、可测试的机制点
+- 这样项目既不像只是在调权重，也不会因为过早重构整个 user model 而显得空泛
+
+因此，这一段应作为项目的核心递进逻辑：
+
+- 先定义问题
+- 再提出机制假设
+- 再说明系统层面的推论
+- 最后落到一个最小、可验证、可工程化的第一步实现
+
 ### 工程优先级
 
 这个项目在工程上应优先被构造成：
@@ -330,9 +401,9 @@ ZhihuRec **不只是**一个前端内容来源。
 
 例如可以是：
 
-- 因 `dual_tower` 召回分较高而进入前列
+- 因长期兴趣 / 搜索相关性匹配较高而进入前列
 - 因 `topic` 匹配与最近搜索 boost 被提升
-- 因主召回不足而由 `hot_fallback` 补齐
+- 因主召回不足而由 `hot_or_fresh` 补齐
 
 ### V1 页面形态
 
@@ -692,46 +763,138 @@ embedding 向量只是画像中的一种紧凑表示。
 
 这个核心项目的亮点应该是：
 
-> 具备双塔召回 + ANN + fallback 的推荐流水线
+> 具备多路轻召回 + 状态感知重排 + fallback 的推荐流水线
 
-这里的“双塔召回”在 `V1` 中应被理解为：
+这里的重点不应再定义为“先把完整双塔做出来”，而应定义为：
 
-> 重点保证“离线向量产出 + 在线 ANN 检索 + 工程可落地”，而不是把训练本身做得很重
+> 先用一个结构正确、解释清楚、工程复杂度可控的推荐系统，把 feed-to-search transition 这条研究主线真正跑起来
 
-### 双塔实现边界
+### 为什么不先做大而全推荐系统
 
-`V1` 对双塔的真实性要求应落在：
+基于当前项目边界，更稳的判断是：
 
-- 有真实的用户 / 内容向量产出流程
-- 有真实的向量索引构建
-- 有在线 ANN 查询或等价的近邻召回服务
-- 有可观测的召回结果、分数和来源
+> 当前数据条件与项目目标，并不支持先做一个完整、重训练、端到端的工业级召回系统
 
-但同时要明确：
+相比之下，一个：
 
-- 训练过程不是 `V1` 的重点
-- 不要求把双塔训练本身做成一个很重的建模项目
-- 必要时甚至可以不做完整训练，而是直接使用离线生成的表示或轻量方案支撑工程链路
+> 多路轻召回 + 状态感知重排
 
-换句话说：
+会更符合 `V1` 的工程约束。原因是：
 
-> `V1` 要证明的是“你把向量化召回系统真正落地了”，而不是“你把模型训练做得多复杂”
+- 能体现推荐系统最基本的结构：召回、重排、反馈闭环
+- 能把研究重点集中在 feed 转 search 的用户状态切换上
+- 不会因为过早做重召回建模而稀释项目的真正亮点
+- 更适合做成一个轻量、可讲清楚、可验证的工程 demo
 
-### V1 向量来源策略
+换句话说，`V1` 的目标不是：
 
-`V1` 在向量来源上应明确采用：
+> 先证明我能做一个很重的召回系统
 
-> 内容向量预计算，用户向量规则聚合
+而是：
+
+> 先证明我能在推荐失配场景下，用一个简单但合理的系统结构接住用户的短期意图变化
+
+### V1 三层推荐骨架
+
+`V1` 更适合明确采用下面这套三层方案：
+
+#### 第 1 层：多路轻召回
+
+先召回一个“不太蠢”的候选集，而不是一开始追求最优全局召回。
+
+推荐的最小召回路由是：
+
+1. 热门 / 新鲜内容
+2. 用户长期兴趣 topic
+3. 最近 search query 相关的 topic 或内容
+4. 少量 exploration 内容
+
+这一层的目标不是“排最对”，而是：
+
+> 尽量别漏掉可能对的东西
+
+也就是说，这一层首先解决的是候选覆盖问题，而不是精细排序问题。
+
+#### 第 2 层：轻量重排器
+
+这才是 `V1` 的核心灵魂。
+
+重排器不需要复杂模型，一个简单、可解释的加权打分公式就够了。
+输入特征应优先采用几类廉价、稳定、可调试的信号：
+
+- 用户长期偏好
+- 用户短期状态
+- 当前 query / search 信号
+- item 自身属性
+- user-item / user-topic 匹配程度
+
+可以直接写成：
+
+> `score = a * long_term_match + b * short_term_match + c * query_match + d * quality + e * diversity + f * mode_switch_adjustment`
+
+#### 第 3 层：状态开关
+
+这就是项目真正的研究重点：
+
+> feed-to-search transition
+
+当用户表现出从被动刷到主动找的迹象时，排序权重发生切换：
+
+- 长期偏好权重下降
+- 当前 intent 相关权重上升
+
+这一层在 `V1` 中不需要被做成一个独立大模型。
+先把它实现为一个：
+
+> gating score
+
+就已经足够成立。
+
+### 一个更稳的工程解释
+
+这套方案的价值，不在于“已经做了完整双塔训练”，而在于它非常符合工业界第一版系统的落地顺序：
+
+> 先把 system position 站稳，再逐步增加 representation complexity
 
 也就是说：
 
-- `Answer` 向量离线生成
-- `User` 向量在线由 `recent_clicked_answers` 和 `topic_weights` 聚合得到
-- `recent_queries` 不直接进入用户向量，而是在召回或排序阶段作为轻量 boost 使用
+- 第一版不急着追求端到端大模型或重训练双塔
+- 而是先承认一个现实：只要 `item` 侧表示足够稳定，`user` 侧表示足够便宜且可更新，系统就已经可以跑出一个成立的个性化闭环
+- 对 `V1` 来说，先完成“可上线、低延迟、可回退、可扩展”的轻量推荐链路，比先完成一个复杂训练流程更重要
 
-### V1 Answer 向量组成
+这类思路与 DoorDash 早期个性化搜索 / 推荐系统的工程取向是一致的：
 
-`V1` 的 `Answer` 向量应由以下字段共同生成：
+- 重活尽量前置到离线
+- 在线阶段只做轻计算
+- 先把个性化能力嵌入现有系统，而不是一开始就重构整个架构
+
+对应到当前项目，可以明确写成：
+
+- 离线阶段负责构建 item 的 topic、tag、可选 embedding、流行度、时效性和基础质量分
+- 在线阶段只读取用户画像与最近状态、生成少量候选、执行轻量重排
+- 一旦个性化状态不可用，应能够自然回退到热门 / 默认推荐逻辑
+
+这里最关键的不是“模型先进”，而是：
+
+> 先把个性化闭环做成一个不会先把系统搞死的版本
+
+因此，`V1` 不应把“是否完整训练了双塔”当成成败标准，而应把下面这些作为更重要的判断标准：
+
+- 是否真的有离线 item 表示产出
+- 是否真的有在线 user 状态聚合
+- 是否真的有稳定的多路候选生成链路
+- 是否真的有失败可回退的默认路径
+- 是否真的能把搜索反馈、画像更新和后续推荐结果串成可验证闭环
+
+### V1 item 侧离线产物
+
+`V1` 的 item 侧离线准备应优先包括：
+
+- `Answer` 的 topic / tag
+- 可选的内容 embedding
+- popularity / freshness / baseline quality
+
+如果要做 embedding，最合适的边界仍然是：
 
 > `question_title + answer_summary + topics`
 
@@ -739,97 +902,75 @@ embedding 向量只是画像中的一种紧凑表示。
 
 - 比只用标题或摘要更完整
 - 比直接引入全文更轻、更稳
-- topic 信息能帮助向量表示和后续解释保持一致
+- topic 信息能帮助表示层与解释层保持一致
 
 这意味着第一版**不需要**：
 
 - 引入完整 answer 全文做主向量
 - 维护多套长短文本向量
-- 为内容向量设计过重的字段拼接策略
+- 为内容表示设计过重的字段拼接策略
 
 这一策略的好处是：
 
 - 最符合当前项目“训练不重、工程链路要真”的边界
-- 能把向量召回、用户画像、搜索反馈三者自然串起来
+- 能把 item 表示、用户状态、搜索反馈三者自然串起来
 - 面试里容易讲清系统链路和 trade-off
 
-### V1 用户向量构造
+### V1 user 侧规则聚合
 
-`V1` 的用户向量应进一步明确为：
+`V1` 的 user 侧不应先追求一个重 user tower，而应先做规则聚合。
 
-> `recent_clicked_answers` 向量加权平均 + `topic_weights` 原型向量
+最合适的最小集合包括：
 
-这意味着：
+- 长期兴趣分布：过去 `7` 天或 `30` 天点击过哪些 topic
+- 短期兴趣分布：过去 `1` 天或当前 session 的 topic
+- 搜索活跃度：最近 search 次数、search session 占比
+- feed 失配迹象：最近 CTR 下降、连续 skip、dwell 下降
 
-- 用户最近点击过的 answer 向量构成主要的短期兴趣表示
-- `topic_weights` 提供中期、可解释的兴趣先验
-- 两者组合形成在线用户表示，用于 ANN 召回
-- 来自 `search_result_click` 的 answer 也应进入 `recent_clicked_answers`，并以更高权重参与这一步聚合
+这就是“用户向量规则聚合”在当前项目里真正应落地的含义：
 
-这里的“更高权重”同样应理解为：
+- 先做简单统计量
+- 先做可解释状态变量
+- 先不训练复杂 user representation
 
-- 相对顺序先固定
-- 精确倍数后置到实现配置
-
-两者的相对关系应明确为：
-
-> 点击向量为主，topic 原型为辅
-
-也就是说：
-
-- `recent_clicked_answers` 是用户向量的主体
-- `topic_weights` 负责提供稳定但较轻的兴趣修正
-- 用户最近行为应比静态或中期兴趣先验更能主导当前召回结果
-
-同时，`recent_clicked_answers` 的聚合应明确采用：
-
-> 时间衰减
-
-也就是说：
-
-- 越新的点击，对用户向量影响越大
-- 越旧的点击，权重应逐步降低
-- `recent_clicked_answers` 中的每条记录都应保留时间信息，以支持在线聚合时的衰减计算
-- `V1` 中只使用最近 `10` 条点击记录参与这一步聚合
-
-这里要继续保持一个明确边界：
-
-- `recent_queries` 不直接进入用户向量
-- 搜索 query 的作用仍主要体现在 topic-aware boost，以及搜索点击后的强权重画像更新上
+如果后面确实需要保留向量化 user 表示，也应放在可选增强位，而不是 `V1` 主体。
 
 ### 面试表述边界
 
 对于这套实现，最稳妥的表达不是：
 
-> 完整训练了一个双塔模型
+> 先做了一个完整双塔推荐系统
 
 而更准确的表达应是：
 
-> 实现了 `dual-tower-style vector recall`，即向量化双侧召回链路：离线生成内容向量，在线聚合用户表示，并通过 ANN 做候选召回
+> 实现了一个 `search-aware re-ranking for feed recommendation` 的轻量推荐系统：通过多路轻召回形成候选集，再利用用户长期偏好、短期状态、当前 query 信号与 mode-switch score 对候选进行状态感知重排
 
 这样表述的好处是：
 
-- 不会夸大训练部分
-- 但能准确体现工程实现深度
-- 与当前 `V1` 的真实实现边界一致
+- 不会夸大召回建模部分
+- 能准确体现这个项目真正的研究重点
+- 与当前 `V1` 的实现边界和演示目标一致
 
 ### v1 的召回桶
 
-一开始只使用两个召回桶：
+一开始应使用下面四类轻召回桶：
 
-1. `dual_tower`
-2. `hot_fallback`
+1. `hot_or_fresh`
+2. `long_term_topic`
+3. `recent_search_topic`
+4. `exploration`
 
 原因：
 
 - 最小化但足够真实的闭环
 - 容易解释
 - 容易调试
-- 能覆盖冷启动和失败场景
+- 更贴合当前研究问题
+- 能覆盖冷启动、意图切换和探索场景
 
 在候选规模上，`V1` 应进一步明确为：
 
-> `dual_tower + ANN` 先召回 Top `20` 候选，再排序到 Top `10`
+> 多路轻召回先产生几十到几百个候选，再压到最终 Top `10`
 
 这样做的原因是：
 
@@ -837,29 +978,29 @@ embedding 向量只是画像中的一种紧凑表示。
 - 第一版实现仍然足够轻
 - 面试里也容易讲清候选集是如何被压缩的
 
-其中，`hot_fallback` 在 `V1` 中应明确为：
+其中，`hot_or_fresh` 在 `V1` 中应明确为：
 
-> 全局热门 answer
-
-也就是说：
-
-- 不再细分成 topic 内热门或多级 fallback
-- 第一版默认使用全局热门内容作为兜底来源
-- 这样最简单，也最利于解释系统在主召回不足时如何补齐结果
-
-这个“全局热门”应进一步理解为：
-
-> 基于 ZhihuRec 的全局交互热度，在某个固定时刻截取的一份快照
+> 全局热门 / 新鲜 answer
 
 也就是说：
 
-- 目的是模拟某个时刻的真实线上热门状态
-- 不在第一版里继续纠结更复杂的热门定义
-- 重点是让 fallback 足够真实，能支撑闭环，而不是把热门逻辑本身做成研究点
+- 既可承担默认兜底
+- 也可承担“别让候选集太蠢”的基础覆盖
+- 第一版不需要再做复杂多级 fallback
+
+这里的 `exploration` 应明确为：
+
+> 故意混入少量与当前主兴趣不同、但仍合理的主题内容
+
+也就是说：
+
+- 它不是随机噪声
+- 它是为了给系统保留发现新兴趣和避免主题过窄的空间
+- 它也让推荐结果更像真实产品，而不是只会围绕单一 topic 打转
 
 `V1` 的 fallback 触发条件也应明确为：
 
-> 只要主召回数量不足 Top `10`，就用 `hot_fallback` 补齐
+> 只要主召回数量不足 Top `10`，就用 `hot_or_fresh` 补齐
 
 也就是说：
 
@@ -871,10 +1012,10 @@ embedding 向量只是画像中的一种紧凑表示。
 
 **不要**从下面这些开始：
 
-- 单独的 topic-based bucket
-- 单独的 search-based bucket
 - 单独的 follow-based bucket
 - 多阶段复杂 rerank 树
+- 完整双塔 + 大规模 ANN 基础设施
+- 重训练 user tower / intent encoder
 
 这些都可以后面再做。
 
@@ -885,7 +1026,7 @@ embedding 向量只是画像中的一种紧凑表示。
 - 先让推荐主循环真实跑起来
 - 先让 fallback 可见
 - 先让系统行为可解释
-- 先把向量召回的工程链路跑通，再考虑训练复杂度
+- 先把多路轻召回与状态感知重排跑通，再考虑更重的召回建模
 
 ---
 
@@ -985,7 +1126,7 @@ embedding 向量只是画像中的一种紧凑表示。
 
 `V1` 的搜索结果来源应采用：
 
-> `query -> topic -> answer` 为主，`hot_fallback` 只用于补齐不足结果
+> `query -> topic -> answer` 为主，`hot_or_fresh` 只用于补齐不足结果
 
 也就是说：
 
@@ -996,7 +1137,7 @@ embedding 向量只是画像中的一种紧凑表示。
 更具体地说，`V1` 更适合：
 
 - 先按相关性链路召回并排序搜索候选
-- 如果相关候选不足，再从 `hot_fallback` 补充剩余结果位
+- 如果相关候选不足，再从 `hot_or_fresh` 补充剩余结果位
 - 在结果和调试信息中明确标识每条内容的来源
 
 这样设计的原因是：
@@ -1201,7 +1342,7 @@ v1 **不要**使用在线 embedding 相似度。
 - 按配置文件中的动态阈值选取相关 topics，而不是写死固定 Top N
 - 基于这些 topics 找到相关 answer 候选
 - 优先返回相关性链路得到的搜索结果
-- 如果相关候选不足，再用 `hot_fallback` 补齐
+- 如果相关候选不足，再用 `hot_or_fresh` 补齐
 - 返回固定 Top `10` 的最小可用且可解释的搜索结果列表
 - 将这些 topics 作为轻量级召回增强信号
 
@@ -1309,9 +1450,21 @@ v1 **不要**使用在线 embedding 相似度。
 - 先有功能闭环
 - 再做性能优化
 
+`V1` 在运行时存储边界上，应进一步明确采用：
+
+> MySQL 作为运行时唯一真源
+
+也就是说：
+
+- 在线服务在运行时只从 MySQL 读取推荐、搜索、画像、事件和调试接口所需数据。
+- 离线构建产物只负责初始化、导入、重建和本地检查，不作为在线服务直接读取的运行时数据源。
+- 如果某类数据需要被在线服务消费，第一步应是把它导入 MySQL，而不是绕过数据库直接读派生文件。
+- 这样可以保证运行时状态、调试观察和后续接口实现都围绕同一份真源展开。
+
 更具体地说，`V1` 的边界是：
 
 - 系统不能依赖 Redis 才能运行
+- 系统不能依赖本地离线产物文件直接参与在线请求处理
 - 不在第一版中处理缓存一致性、预热策略和失效策略
 - Redis 只作为后续性能优化项保留
 
@@ -1355,9 +1508,217 @@ v1 **不要**把 recent queries 直接喂进双塔模型的用户塔。
 
 换句话说：
 
-- `V1` 里，`search_query` 只影响召回层
+- `V1` 里，raw `search_query` 本身不直接进入精排打分
+- 搜索信号优先影响召回层；如需进入排序，也应先被压缩成少量可解释状态特征
 - 不把 raw `search_query` 直接做成精排特征
 - 也不在第一版里单独搭建更重的粗排 / 精排双模型体系
+
+### feed-to-search 不要先理解成召回革命
+
+在 `V1` 中，更稳的理解方式是：
+
+> 先把它看成一个排序态切换问题，而不是召回层革命
+
+也就是说：
+
+- 用户仍然大概率在同一个内容池附近活动
+- 但他此刻不一定还想吃默认 feed 那套排序逻辑
+- feed 到 search 的切换，首先说明的是“当前排序状态可能已经不对味”，而不一定要求立刻重做整个召回架构
+
+因此，这个项目在第一版里更适合做的是：
+
+- 保持主召回链路尽量稳定
+- 把 feed-to-search transition 先拆成一组廉价、可解释、可实时更新的状态特征
+- 再把这些特征作为排序 gating signal，去调节当前 intent 与长期偏好的相对权重
+
+### feed-to-search 的廉价状态特征
+
+不要一开始就引入抽象的 `search_mode` 二值标签。
+更适合 `V1` 的方式，是先把“用户从刷推荐转去搜索”拆成几组可直接计算的便宜特征。
+
+#### 1. 最近主动性上升
+
+用于观察用户是否突然从被动消费切换到主动寻找：
+
+- `recent_search_cnt_10m`
+- `recent_search_cnt_1d`
+- `search_after_feed_view_gap`
+- `search_session_ratio`
+
+这组特征表达的是：
+
+> 用户开始主动出手了
+
+#### 2. 最近推荐失配加重
+
+用于区分“用户本来就爱 search”与“因为当前 feed 没接住，所以开始 search”：
+
+- `feed_ctr_drop_vs_baseline`
+- `feed_dwell_drop_vs_baseline`
+- `skip_streak`
+- `impression_without_click_cnt_recent`
+
+这组特征表达的是：
+
+> 用户不是单纯更活跃，而是当前推荐可能开始不对味
+
+#### 3. search 与既有画像偏离
+
+用于判断这次搜索是否偏离长期兴趣或最近曝光轨迹：
+
+- `query_topic_vs_user_profile_sim`
+- `query_topic_vs_recent_feed_topic_sim`
+- `query_topic_novelty`
+- `category_switch_flag`
+
+这组特征特别适合当前项目的边界，因为它可以直接复用：
+
+- 离线构建的 topic / 内容表示
+- 在线维护的 `topic_weights`
+- 最近 feed 暴露或点击记录
+
+#### 4. search 表达强度
+
+用于区分“随便搜一下”与“带着明确任务来”：
+
+- `query_len`
+- `query_has_specific_entity`
+- `query_has_filter_term`
+- `query_refine_from_prev_query`
+- `query_repeat_with_more_specific_terms`
+
+这组特征表达的是：
+
+> 系统现在是否应该从泛兴趣推荐，切向更 task-oriented 的内容组织方式
+
+#### 5. search 后反馈是否验证了当前判断
+
+不要只看用户有没有 search，还要看 search 之后的行为是否证明这次 mode switch 真的成立：
+
+- `search_result_click`
+- `search_to_dwell`
+- `search_to_save_or_like`
+- `search_to_conversion`
+- `search_reformulation_cnt`
+
+如果 search 之后点击率、停留或后续互动明显变好，说明当前状态切换判断是有意义的。
+如果 search 后仍不断改写 query，则说明系统连主动 intent 也没有接住。
+
+### V1 的状态分数与 gating
+
+这些特征在 `V1` 中不应直接导向一个重模型，而更适合先被压成一个轻量状态分数：
+
+> `mode_switch_score = a * 主动性上升 + b * feed失配 + c * topic偏离 + d * query明确度`
+
+这不是为了做一个学术上复杂的状态识别器，而是为了给当前排序层一个：
+
+> 状态感知开关
+
+最朴素的使用方式可以是：
+
+- 分数低：继续走默认 feed 排序
+- 分数中：提高当前 search topic 相关内容的权重
+- 分数高：明显降低长期偏好权重，提高当前 query / topic 权重
+
+这里的关键点是：
+
+- 它影响的是现有排序器中的权重关系
+- 它不是直接替换现有推荐系统
+- 它也不是要求第一版就把 search 信号喂进完整双塔或粗排 / 精排模型
+
+因此，`V1` 更准确的说法应是：
+
+> 我们不把 feed-to-search transition 先建模成复杂的 end-to-end intent encoder，而是先把它拆成一组廉价、可解释、可实时更新的行为特征；随后构造一个 mode-switch score，将其作为现有排序器的 gating feature，在候选集内动态提升当前 intent 相关内容的权重，而不是直接替换召回层。
+
+### Pinterest user journeys 的可借鉴点与边界
+
+Pinterest 那篇 user journeys 文章，对本项目最有参考价值的地方主要有两点，但都需要分清“原文明确做了什么”和“本项目可以合理借用什么”。
+
+#### 1. 它提供了一个很实用的后排序去重思路
+
+文章在 journey ranking 之后，额外做了一步 diversification。
+它不是把相似 topic / journey 直接删除，而是：
+
+- 先得到一批已经排过序的候选
+- 再从前往后扫描
+- 如果当前候选与前面更高排位的候选过于相似，就对它施加惩罚项
+- 最后按更新后的分数重新排序
+
+原文里，这个相似度是用预训练关键词 embedding 来衡量的；当前候选与前面“撞车”的次数越多，分数压得越低；文中提到 penalty 超参数通常取 `0.95`。
+
+对本项目来说，这个思路最值得借用的不是某个具体公式，而是：
+
+> 用一个轻量的“排序后相似项惩罚”机制，避免最后展示出来的前几个 topic / 内容都挤在同一个意思上
+
+翻译到当前项目中，可以直接落成：
+
+- 先得到若干 topic 或 item 候选
+- 按基础分排序
+- 再从前往后扫描
+- 如果后面的候选与前面已保留候选过于相似，就降权，而不是直接删除
+
+这样做的好处是：
+
+- 保留主题信号，不会因为硬删除而损失覆盖
+- 让最终结果更有多样性
+- 实现非常轻，适合 `V1`
+
+#### 2. 它没有直接给出 passive-to-active 的 mode switch 判别器
+
+文章明确写出来的是另一条路线：
+
+- 先把用户近期行为组织成若干 journey cluster
+- 再做 ranking
+- 再做 diversification
+- 再做 stage prediction
+
+其中，stage prediction 的重点是：
+
+- 区分 `situational` 和 `evergreen`
+- 对 `situational` journey 再判断是 `ongoing` 还是 `ended`
+
+原文也明确说，这些 inferred journeys 可以用于 downstream retrieval and ranking。
+
+这对当前项目真正有价值的启发是：
+
+> 可以先构造一个比普通兴趣画像更高一层的中间状态表示，再把这个状态提供给后续的 retrieval / ranking
+
+但同时必须明确：
+
+- Pinterest 公开文章没有直接给出一个“从 passive browsing 切到 active problem solving”的专门判别模块
+- 它也没有直接提供一个可拿来即用的 feed-to-search mode switch 模型
+- 因此，这部分不能被表述成“直接复现 Pinterest”
+
+更准确的说法应是：
+
+> Pinterest 证明了“先做中间层状态表示，再服务下游召回和排序”这条路是成立的；而本项目的 mode switch 定义，需要结合 ZhihuRec 的 query、click、topic 和 timestamp 自行设计
+
+#### 3. 本项目如何合理借用这个思路
+
+基于这篇文章，本项目更合理的做法不是把 search 当成单个更强 engagement feature，而是把下面这些现象一起看作 mode switch 的候选信号：
+
+- `search` 占比上升
+- topic 集中度升高
+- 短时间内重复围绕同一 topic 互动
+- query 变得更具体、更 task-oriented
+
+一旦检测到这种切换，系统就可以：
+
+- 临时重构推荐时使用的用户状态表示
+- 让当前 task / topic 的权重暂时压过长期兴趣
+- 在召回和排序阶段提高与当前 task 相关候选的优先级
+
+这样做与 Pinterest 的共同点在于：
+
+- 都不是只盯住单次 engagement
+- 都先构造一个高于普通兴趣画像的中间层表示
+- 都把这个中间层表示提供给 downstream retrieval / ranking
+
+不同点在于：
+
+- Pinterest 公开讲清楚了 diversification 与 stage prediction
+- 但没有公开给出一个专门针对 passive browsing 到 active problem solving 的 mode switch 判别器
+- 因此，本项目的这部分设计是借鉴其系统分层思路，而不是照搬其现成模块
 
 ### v1 排序边界
 
@@ -1373,14 +1734,14 @@ v1 **不要**把 recent queries 直接喂进双塔模型的用户塔。
 
 一个推荐的规则打分结构可以是：
 
-- 双塔召回分数作为基础分
-- `topic_weights` 匹配作为兴趣修正项
-- `hot_fallback` 候选天然低于正常召回候选
+- 长期兴趣匹配作为基础偏好分
+- 短期状态 / topic 匹配作为兴趣修正项
+- `hot_or_fresh` 候选天然低于更强个性化候选
 
 这里要明确：
 
-- `recent_queries` 对候选的影响发生在召回阶段
-- 排序层可以展示 `query recall boost` 这类调试字段
+- `recent_queries` 对候选的主影响仍发生在召回阶段
+- 排序层只允许使用由搜索行为压缩出的少量状态特征或 `query recall boost` 这类派生调试字段
 - 但这不等于把 raw `search_query` 直接作为排序项使用
 
 前端调试信息应尽量能展示每个候选的：
@@ -1403,9 +1764,9 @@ v1 **不要**把 recent queries 直接喂进双塔模型的用户塔。
 
 一个简单的打分直觉可以是：
 
-- 双塔提供基础召回信号
+- 长期兴趣提供基础偏好信号
 - topic 匹配提供用户兴趣修正
-- recent-query-to-topic 匹配提供轻量级召回增强，而不是直接精排打分
+- recent-query-to-topic 匹配提供轻量级 intent 增强，而不是直接精排打分
 
 这已经足够构成一个有意义的第一版闭环。
 
@@ -1458,8 +1819,8 @@ v1 **不要**把 recent queries 直接喂进双塔模型的用户塔。
 
 1. 用户打开 feed
 2. 系统读取用户画像
-3. 系统通过 `dual_tower` 召回答案候选
-4. 如果候选不足 / 缺失，则使用 `hot_fallback`
+3. 系统通过多路轻召回生成答案候选
+4. 如果候选不足 / 缺失，则使用 `hot_or_fresh` 补齐
 5. 系统合并候选并执行规则型轻排序
 6. 系统返回固定 Top `10` 的带调试字段答案卡片
 7. 用户进行点击
@@ -1508,9 +1869,9 @@ v1 **不要**把 recent queries 直接喂进双塔模型的用户塔。
 - 以 Answer 为主要推荐实体，而不是更复杂的混合实体 Feed
 - 使用轻前端 + 适度模块化的调试前端，而不是构建追求易用性的产品页面
 - `V1` 只重建一个小而精的内容世界，而不追求大规模在线数据集
-- 先做 `dual_tower + hot_fallback`，而不是很多召回桶
-- 双塔优先保证“离线向量产出 + 真 ANN 检索”，而不是重训练流程
-- `V1` 采用“内容向量预计算 + 用户向量规则聚合”，而不是完整重训练双塔
+- 先做“多路轻召回 + 状态感知重排 + hot_or_fresh 补齐”，而不是重召回建模
+- item 侧优先保证离线 topic / tag / 质量特征产出；embedding 只作为可选增强位
+- `V1` 采用“item 离线产物 + user 规则聚合 + 在线轻量重排”，而不是完整重训练双塔
 - 用户向量由 `recent_clicked_answers` 加权平均与 `topic_weights` 原型向量构成
 - 排序层先采用规则型轻排序，而不是额外引入学习排序模型
 - 搜索先做成“极简但真实的召回链路”，而不是完整搜索产品
@@ -1529,7 +1890,8 @@ v1 **不要**把 recent queries 直接喂进双塔模型的用户塔。
 - 使用 `topic_weights + recent clicks + recent queries`，而不是庞大的用户画像设计
 - 先存原始 query，只有在搜索点击后才更新 topic
 - 用共现统计 + 倒排查找做 query-topic 映射，而不是在线 embedding
-- `V1` 先只用 MySQL，Redis 在第一版跑通后再加
+- `V1` 运行时以 MySQL 作为唯一真源，离线产物只负责导入与重建，Redis 在第一版跑通后再加
+- 第一批目录集合固定为 `data/`、`build/demo_world/`、`plan/`、`scripts/`、`sql/`、`backend/`、`frontend/`；其中 `build/demo_world/` 是离线导入包目录，不是运行时目录
 - `V1` 只要求本地单机跑通，但必须提供一键初始化脚本
 - 先跑通功能闭环，再做延迟优化
 
@@ -1571,6 +1933,31 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 - 第一版不要求容器化交付
 - 第一版不要求远端部署可访问
 
+第一批真正开始编码时，应明确采用：
+
+> 后端闭环与极简调试前端同阶段推进
+
+也就是说：
+
+- 第一批交付**包含前端**，不把前端整体后置到下一阶段。
+- 但前端的职责不是单独追求产品完成度，而是消费后端接口、暴露调试信息、支撑链路验证与演示。
+- 如果前后端实现范围发生冲突，应优先保证后端链路、数据边界和调试能力完整，前端只做到“足够服务后端”。
+
+第一批实现的最小目录集合，应明确采用：
+
+> `data/` + `build/demo_world/` + `plan/` + `scripts/` + `sql/` + `backend/` + `frontend/`
+
+也就是说：
+
+- `data/` 继续保存 ZhihuRec 原始数据。
+- `build/demo_world/` 继续作为离线派生产物与导入包目录存在，不改造成运行时直读目录。
+- `plan/` 继续负责执行拆解，而不是重新定义高层边界。
+- `scripts/` 继续承载离线构建、导入、初始化、重置和回放脚本。
+- `sql/` 在第一批中立即创建，用来定义 MySQL 作为运行时唯一真源的 schema。
+- `backend/` 在第一批中立即创建，用来承载逻辑单体后端及 `recommendation / search / profile / event` 等模块。
+- `frontend/` 在第一批中立即创建，但只服务后端调试、验证和演示。
+- 第一批**不要求**单独创建 `docs/`；高层边界先统一收敛在本文件，避免 API 契约和边界说明散落到多处。
+
 但同时必须满足：
 
 > 要有一键初始化脚本
@@ -1581,6 +1968,15 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 - 数据库初始化
 - 必要的种子数据 / 演示数据准备
 - 启动前所需的最小预处理步骤
+- 默认演示用户或演示状态重置
+- 后端服务启动
+- 前端页面启动
+
+也就是说：
+
+- 一键初始化脚本不只负责“把数据准备好”，还要负责把本地演示环境真正拉起。
+- 用户执行一次脚本后，应能直接进入可调试、可演示的前后端运行状态。
+- 如果某些启动步骤因本地环境差异需要分平台处理，也应由同一入口脚本统一编排，而不是让用户手工拼接多个命令。
 
 此外，`V1` 还应提供：
 
@@ -1612,12 +2008,14 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 
 也就是说：
 
-- `/feed` 负责返回推荐结果
-- `/search` 一次请求内同时负责处理 query、记录 `search_query` / `recent_queries`，并返回搜索结果
+- `/feed` 默认负责返回最终推荐结果；当 `debug=true` 时，额外返回 recall candidates 与重排轨迹，便于调试召回 / 排序链路
+- `/search` 一次请求内同时负责处理 query、记录 `search_query` / `recent_queries`，并返回搜索结果；当 `debug=true` 时，额外返回命中 topics、结果来源、score 组成与 fallback 补位信息
 - `search_query` 不再额外走统一事件上报，也不拆单独的前置记录接口，而是在 `/search` 中自然完成写入
 - 点击类行为拆成更直白的接口，例如：
   - `/event/recommendation_click`
   - `/event/search_result_click`
+- 点击接口默认只返回 `ok`；当 `debug=true` 时，额外返回本次事件导致的画像更新摘要
+- 额外提供只读调试接口 `/debug/profile`，用于查看当前 `topic_weights / recent_clicked_answers / recent_queries / behavior_score`，并返回用户向量摘要与最近 `N` 次画像变更摘要
 
 这样做的原因是：
 
@@ -1671,7 +2069,7 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 
 这个项目未来在简历上的一种可能表述是：
 
-> 基于 ZhihuRec 构建了一个端到端内容推荐系统，包含双塔 ANN 召回、热门 fallback、可解释用户画像以及搜索到推荐的反馈机制，并将用户搜索行为作为轻量级意图信号，用于提升后续内容召回效果。
+> 基于 ZhihuRec 构建了一个轻量内容推荐系统，采用多路轻召回、状态感知重排和热门 / 新鲜补齐机制，并将用户从 feed 转向 search 的行为作为短期意图切换信号，用于动态调整后续推荐排序。
 
 这还不是最终措辞，但方向应该朝这里收敛。
 
@@ -1702,12 +2100,12 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 
 - 项目目标：优先服务面试型工程项目，而不是研究型 Demo 或产品化 UI。
 - 工程主线：`A` 是推荐主链路与向量召回工程落地，`B` 是“搜索反哺推荐”的面试故事。
-- 推荐架构：`dual-tower-style vector recall + ANN + hot_fallback + 规则型轻排序`。
-- 候选规模：`dual_tower + ANN` 先召回 Top `20`，再排序压到 Top `10`。
-- fallback 来源：`hot_fallback` 明确采用全局热门 answer。
+- 推荐架构：`多路轻召回 + 状态感知重排 + hot_or_fresh 补齐 + 规则型轻排序`。
+- 候选规模：多路轻召回先产生几十到几百个候选，再排序压到 Top `10`。
+- fallback 来源：`hot_or_fresh` 明确采用全局热门 / 新鲜 answer。
 - 热门定义：基于 ZhihuRec 的全局交互热度，并截取一个固定时刻的快照来模拟线上状态。
-- fallback 触发：只要主召回数量不足 Top `10`，就用 `hot_fallback` 补齐。
-- 向量策略：内容向量离线生成，用户向量规则聚合；不做完整重训练双塔。
+- fallback 触发：只要主召回数量不足 Top `10`，就用 `hot_or_fresh` 补齐。
+- 表示策略：item 侧离线生成 topic / tag / 可选 embedding，user 侧采用规则聚合；不做完整重训练双塔。
 - Answer 向量：由 `question_title + answer_summary + topics` 生成。
 - User 向量：`recent_clicked_answers` 加权平均为主，`topic_weights` 原型向量为辅；最近点击带时间衰减。
 - 搜索定位：搜索是极简但真实的召回链路，核心是 `query -> topic -> answer`，不是完整搜索产品。
@@ -1720,8 +2118,8 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 - query-topic 规则：`V1` 只保留“完整短语优先”和“多 token 一致指向加成”两条规则。
 - 搜索结果：相关性链路为主，热门只做补齐，不做等价混合加权。
 - 搜索结果数：固定返回 Top `10`。
-- 搜索调试展示：至少显示命中的 topics、结果来源和匹配分组成。
-- 搜索信号用法：`search_query` 在 `V1` 只影响召回层，不直接进入粗排 / 精排。
+- 搜索调试模式：默认只返回搜索结果；当 `debug=true` 时，额外返回命中的 topics、结果来源、score 组成与 fallback 补位信息。
+- 搜索信号用法：raw `search_query` 不直接进入粗排 / 精排；搜索信号优先影响召回层，并可压成少量状态特征进入排序 gating。
 - 推荐结果数：固定返回 Top `10`。
 - 画像结构：单表 `user_profile`，包含 `topic_weights`、`recent_clicked_answers`、`recent_queries`。
 - 画像规模：`topic_weights` 只保留 Top 10；`recent_clicked_answers` 只保留最近 10 条；`recent_queries` 只保留最近 5 条。
@@ -1736,15 +2134,22 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 - Topic 空间：保留 ZhihuRec 原生 topic，但只做轻清洗 / 轻合并，并选取一个可控子集。
 - 数据规模：只重建一个小而精的内容世界，不追求大规模在线数据集。
 - 用户范围：只围绕一个演示用户跑完整闭环，不做登录和多用户系统。
+- 第一批交付：包含后端闭环与极简调试前端；前端与后端同阶段推进，但定位明确从属于后端开发、调试、验证与演示。
+- 第一批目录：固定为 `data/`、`build/demo_world/`、`plan/`、`scripts/`、`sql/`、`backend/`、`frontend/`；`docs/` 不作为第一批必建目录。
+- `build/demo_world/` 定位：保存离线派生产物和导入包，只服务初始化、导入、重建、校验，不参与在线请求直读。
 - 前端形态：轻前端 + 适度模块化，单页不是硬约束；职责是服务后端开发、调试、演示，而不是追求易用性。
 - Answer 卡片内容：`V1` 只保留标题、摘要、author、topics 四类核心展示信息。
+- Feed 调试模式：默认只返回最终 Top `10`；当 `debug=true` 时，额外返回 recall candidates、重排轨迹，以及每条结果的关键打分字段。
 - Feed 调试字段：至少显示召回来源、基础召回分、topic 匹配分、query recall boost、最终分、fallback 标记、被选中原因。
+- 点击接口调试模式：默认只返回 `ok`；当 `debug=true` 时，返回本次 `topic_weights` / `recent_clicked_answers` / `recent_queries` 的更新摘要，而不是直接返回新 feed 或完整画像快照。
+- 画像调试接口：提供只读 `/debug/profile`，明确作为调试能力存在，不伪装成产品接口；返回当前 `topic_weights / recent_clicked_answers / recent_queries / behavior_score`，并可附带用户向量摘要，如维度、范数、top contributing answers/topics，但不直接暴露完整 embedding 数组；同时返回最近 `N` 次画像变更摘要，而不只是一条最近更新。
 - 被选中原因：采用规则模板生成，依据最高贡献项或主要贡献组合输出简洁解释。
 - 后端形态：逻辑单体 + 模块分层，至少分出 `recommendation / search / profile / event`，不引入消息队列和服务注册。
-- API 边界：至少提供 `/feed`、`/search`，以及拆开的点击事件接口；`/search` 一次请求内自然记录 `search_query` / `recent_queries` 并返回结果。
+- API 边界：至少提供 `/feed`、`/search`、`/debug/profile`，以及拆开的点击事件接口；`/feed` 通过 `debug=true` 暴露召回与重排调试信息，`/search` 在一次请求内自然记录 `search_query` / `recent_queries` 并在 `debug=true` 时返回搜索调试信息，点击接口在 `debug=true` 时返回画像更新摘要，`/debug/profile` 负责只读查看当前画像状态、用户向量摘要与最近 `N` 次画像变更摘要。
 - 用户身份：接口保留 `user_id` 参数，但 `V1` 不做登录、JWT 和完整鉴权，只围绕默认演示用户运行。
+- 运行时真源：`V1` 只以 MySQL 作为在线服务唯一真源；离线产物只负责初始化、导入、重建与校验，不作为运行时直读源。
 - 基础设施：`V1` 先只用 MySQL；Redis 等第一版跑通后再加。
-- 运行方式：本地单机跑通，必须提供一键初始化脚本。
+- 运行方式：本地单机跑通，必须提供一键初始化脚本，且该脚本覆盖环境检查或说明、MySQL 初始化、demo world 导入、默认演示用户重置、后端启动、前端启动。
 - 重置能力：提供开发脚本形式的一键重置能力，不做前端入口。
 
 ### 参数与验证
@@ -1755,3 +2160,65 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 - 主优化目标：响应性与稳定性的平衡。
 - 关键次指标：`Search Carryover Gain@K`，用于支撑“搜索反哺推荐”的核心故事。
 - 面试口径：参数不是拍脑袋定的，而是通过回放测试、代理指标和工程观察收敛得到的。
+
+---
+
+## 18. 当前仓库基线与后续修改方式
+
+这一节不是新增产品设定，而是把当前仓库里已经发生的事实、以及后续如何继续修改边界，明确写进同一份中文主文档。
+
+### 当前仓库基线
+
+当前仓库已经确定的事实是：
+
+- 已存在 `data/zhihurec_1m/raw`，并已放入 ZhihuRec 1M 对应的 8 张原始 CSV。
+- 已存在 `build/demo_world/`，并已生成一组 demo world 离线派生产物。
+- 已存在 `data/zhihurec_1m/meta/check.txt`，用于记录数据检查结果。
+- 已存在 `scripts/inspect_zhihurec.py`，用于检查原始表字段含义、主键唯一性和主要连接关系。
+- 已存在 `plan/zhihurec-1m-setup/`，说明 1M 数据准备与本地校验已经完成。
+- 已存在 `plan/zhihurec-project-bridge/`，其中已经把“从原始数据到项目运行边界”的工作拆成 `schema / offline build / API contract` 三步。
+- 已存在 `.gitignore`，用于排除原始数据、构建产物、虚拟环境和本地运行噪声。
+- 已存在 `sql/v1_schema.sql`，用于定义 MySQL 作为 `V1` 在线运行时唯一真源的 schema。
+- 已存在 `docs/v1_api_contract.md`，用于记录当前冻结的 `V1` API 契约。
+- 已存在 `scripts/build_demo_world.py` 和 `scripts/import_demo_world.py`，分别用于构建 demo world 离线产物和生成 MySQL 导入 SQL。
+- 已存在 `backend/app/main.py`，以及 `backend/app/routers/*.py`、`backend/app/schemas/*.py`、`backend/app/services/*.py`，用于承载 FastAPI 路由、请求响应模型和服务层骨架。
+- 已存在 `backend/app/repositories/base.py` 和 `backend/app/repositories/unwired.py`，用于定义运行时仓库接口和当前占位实现。
+- 当前仓库**还没有**前端目录，`frontend/` 仍待后续步骤创建。
+- 当前后端的主要阻塞点是：`UnwiredRuntimeRepository` 仍然是 active repository，因此业务接口在 MySQL repository 实现前会返回受控的 `503 repository_not_ready`。
+
+这意味着：
+
+- 项目方向、schema、API 契约、离线导入包和后端骨架已经足够清楚，可以开始进入运行时闭环实现。
+- 当前阶段不再是“写代码之前的边界确认”，而是要把 `UnwiredRuntimeRepository` 逐步替换为 MySQL-backed runtime repository。
+- 接下来最重要的工作不是继续发散想法，而是按 `plan/zhihurec-v1-runtime-closed-loop/` 把 MySQL 读写、画像更新、调试脚本和极简前端逐步跑通。
+
+### 这份文档的角色
+
+从现在开始，这份 `project_brief_zh.md` 应作为：
+
+> `V1` 边界与关键决策的主文档
+
+也就是说：
+
+- 任何会影响目录结构、数据边界、API 形态、运行方式、演示路径的决定，优先先改这份文档。
+- `plan/` 目录中的文件主要负责把这里已经确认的结论拆成执行步骤，而不是另起一套新的边界定义。
+- 如果后续发现 `plan/` 与本文件不一致，应优先更新本文件中的边界表述，再回头修正执行计划。
+
+这样做的原因是：
+
+- 以后讨论只围绕一个中文主文档进行，不会把边界散落在多个临时说明里。
+- 对外讲项目时，产品叙事、工程取舍和实现边界保持一致。
+- 对内推进实现时，可以把这里当作唯一的高层约束来源。
+
+### 当前状态
+
+截至当前，这一轮高优先级的 `V1` 实现边界已经完成冻结。
+
+也就是说：
+
+- 第一批是否包含前端，已经明确。
+- 运行时唯一真源是否为 MySQL，已经明确。
+- 第一批最小目录集合，已经明确。
+- 一键初始化脚本是否覆盖前后端启动与演示用户重置，已经明确。
+
+下一步不应继续停留在开放式边界讨论，而应把这些结论回写到执行计划，并开始进入真正的实现拆解。
