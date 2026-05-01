@@ -1930,7 +1930,7 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 也就是说：
 
 - 后端服务、本地数据库、前端页面在本机环境即可完成启动和演示
-- 第一版不要求容器化交付
+- 第一版的 MySQL 通过 docker compose 起一个本机容器（见仓库根 `docker-compose.yml`，镜像 `mysql:8.0`），用于避免污染本机环境与跨平台一致性。应用本身（FastAPI 后端、静态前端）不容器化，仍直接用本机 Python 与静态服务器跑。
 - 第一版不要求远端部署可访问
 
 第一批真正开始编码时，应明确采用：
@@ -2183,14 +2183,17 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 - 已存在 `scripts/build_demo_world.py` 和 `scripts/import_demo_world.py`，分别用于构建 demo world 离线产物和生成 MySQL 导入 SQL。
 - 已存在 `backend/app/main.py`，以及 `backend/app/routers/*.py`、`backend/app/schemas/*.py`、`backend/app/services/*.py`，用于承载 FastAPI 路由、请求响应模型和服务层骨架。
 - 已存在 `backend/app/repositories/base.py` 和 `backend/app/repositories/unwired.py`，用于定义运行时仓库接口和当前占位实现。
-- 当前仓库**还没有**前端目录，`frontend/` 仍待后续步骤创建。
-- 当前后端的主要阻塞点是：`UnwiredRuntimeRepository` 仍然是 active repository，因此业务接口在 MySQL repository 实现前会返回受控的 `503 repository_not_ready`。
+- 已存在 `frontend/`，包含 `index.html`、`app.js`、`styles.css`、`README.md`，作为只服务后端调试与演示的极简前端，由 `python -m http.server 5173 -d frontend` 静态服务。
+- 已存在 `backend/app/repositories/mysql.py`（`MysqlRuntimeRepository`），当 `ZHIHUREC_DATABASE_URL` 配置时自动作为 active repository；`UnwiredRuntimeRepository` 退化为缺省 fallback。
+- 已存在 `docker-compose.yml`（仓库根），用 `mysql:8.0` 提供本机 MySQL，端口 3306，DB `zhihurec_demo`，账号 root/root，volume `zhihurec_zhihurec_mysql_data` 持久化。
+- 已存在 `docs/v1_local_runbook.md`、`scripts/apply_demo_mysql.py`、`scripts/reset_demo_user.py`、`scripts/replay_demo_events.py`，构成本地一键初始化与离线回放的最小工具集。
+- 已存在 `plan/zhihurec-v1-runtime-closed-loop/`（runtime 闭环执行计划，全部 7 步已 verified）和 `plan/zhihurec-v1-gap-checklist/`（冷启动续接清单 + 傻瓜操作手册）。
 
 这意味着：
 
-- 项目方向、schema、API 契约、离线导入包和后端骨架已经足够清楚，可以开始进入运行时闭环实现。
-- 当前阶段不再是“写代码之前的边界确认”，而是要把 `UnwiredRuntimeRepository` 逐步替换为 MySQL-backed runtime repository。
-- 接下来最重要的工作不是继续发散想法，而是按 `plan/zhihurec-v1-runtime-closed-loop/` 把 MySQL 读写、画像更新、调试脚本和极简前端逐步跑通。
+- 项目方向、schema、API 契约、离线导入包、后端骨架、MySQL runtime、极简调试前端、离线回放脚本已经全部到位。
+- 当前阶段已经离开”写代码之前的边界确认”和”runtime 闭环搭建”，进入”V1 故事完整度收尾 + 课程产出”阶段。
+- 接下来最重要的工作不是继续发散想法，而是按 `plan/zhihurec-v1-gap-checklist/` 把 brief §17 要求的代理指标（Search Carryover Gain@K）、brief §0 要求的数据分析报告与 HCI 报告这些剩余产出补齐。
 
 ### 这份文档的角色
 

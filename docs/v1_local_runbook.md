@@ -18,6 +18,24 @@ Expected output includes:
 44690 row(s) across 12 table payload(s)
 ```
 
+## 2.5 Start MySQL via Docker Compose
+
+The repo ships a `docker-compose.yml` at root that brings up `mysql:8.0` on `127.0.0.1:3306` with database `zhihurec_demo`, account `root/root`, and a named volume for persistence.
+
+```powershell
+docker compose up -d
+do { Start-Sleep -Seconds 3; $s = docker inspect -f '{{.State.Health.Status}}' zhihurec-mysql 2>$null; "status=$s" } while ($s -ne 'healthy')
+```
+
+Stop later with:
+
+```powershell
+docker compose down       # keep volume
+docker compose down -v    # nuke volume too
+```
+
+If you already have a local MySQL running, you can skip this section and use the URL it exposes in §3 below.
+
 ## 3. Configure MySQL
 
 ```powershell

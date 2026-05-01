@@ -792,3 +792,7 @@ Get-Content docs\v1_local_runbook.md | Select-String '2.5 Start MySQL via Docker
 每次会话做完一项后，在这里追加一行：`YYYY-MM-DD - <item ID> - <一句话结果>`。
 
 - 2026-05-01 — runtime-closed-loop 全部 7 步在真实 MySQL 上验证通过；docker-compose.yml 引入；本 checklist 第一版；本 checklist 第二版（傻瓜化）。
+- 2026-05-01 — A3 — brief §14 第 1933 行已与 docker-compose.yml 对齐。
+- 2026-05-01 — A4 — brief §18 仓库基线已重写：frontend 已存在、MysqlRuntimeRepository 当前 active、新增 docker-compose.yml/runbook/scripts/plan 都已声明。
+- 2026-05-01 — D1 — runtime-closed-loop README 加入 2026-05-01 update 段，指向 gap-checklist。
+- 2026-05-01 — D2 — v1_local_runbook.md 在 §3 之前新增 §2.5 "Start MySQL via Docker Compose"。

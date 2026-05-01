@@ -87,6 +87,8 @@ Not yet verified in this environment:
 
 The missing verification is environmental, not a planned code step: it needs a reachable MySQL instance and a configured `ZHIHUREC_DATABASE_URL`.
 
+**2026-05-01 update**: The three "Not yet verified in this environment" items above have all been verified against a real docker MySQL (`mysql:8.0`, see `docker-compose.yml` at repo root): schema/seed apply, real 200 responses from `/debug/profile` / `/feed` / `/search` / both click endpoints, `replay_demo_events.py --limit 10` 10/10 ok, and the static frontend serving 4 assets. See `plan/zhihurec-v1-gap-checklist/` for the cold-start handoff. The "Resume prompt" section below is superseded; use the gap-checklist's resume prompt instead.
+
 ## Current handoff
 Do not restart from earlier bridge/skeleton plans. Start from this plan and the local runbook:
 
