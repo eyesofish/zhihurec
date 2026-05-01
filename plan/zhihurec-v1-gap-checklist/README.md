@@ -766,23 +766,42 @@ Get-Content docs\v1_local_runbook.md | Select-String '2.5 Start MySQL via Docker
 ```text
 请继续在 D:\Github\zhihurec 执行当前项目。
 
-先读取：
-- D:\Github\zhihurec\plan\project_brief_zh.md
-- D:\Github\zhihurec\plan\zhihurec-v1-gap-checklist\README.md（这份文件，是上次会话的 cold-start 入口与傻瓜操作手册）
-- D:\Github\zhihurec\docs\v1_local_runbook.md
-- D:\Github\zhihurec\backend\README.md
+先读取并理解（顺序很重要）：
+1. D:\Github\zhihurec\plan\zhihurec-v1-gap-checklist\README.md（这份文件，本项目所有"还没做的事"的总入口）
+   - 直接跳到末尾"Verification log"看上一会话的真实进度（哪些 item ID 已 ✅）
+   - 然后看"B3 冷启动混合实现状态"段和"B4 状态特征对照表"段，了解仓库当前真实差距
+2. D:\Github\zhihurec\plan\project_brief_zh.md §7 / §14 / §17 / §18（V1 边界主文档关键段）
+3. D:\Github\zhihurec\plan\zhihurec-v1-cold-start-mixing\README.md（当前活跃 plan，B3 实现入口）
+4. D:\Github\zhihurec\docs\v1_metrics.md（最近两条 Carryover Gain@K 基线）
+5. D:\Github\zhihurec\backend\README.md 与 D:\Github\zhihurec\docs\v1_local_runbook.md（运行命令）
 
-不要从旧的 1m-setup / clarification / bridge / skeleton plan 重新开始；这些都是 verified 的历史记录。
-不要重跑 zhihurec-v1-runtime-closed-loop 的端到端验证；那一轮已经在 2026-05-01 完成。
+历史进度速读（至 2026-05-01 末）：
+- runtime-closed-loop 7 步全部 verified，docker-compose.yml 已引入。
+- gap-checklist 的 A1 / A3 / A4 / D1 / D2 / B1 / B2 全部 ✅。
+- B2 当前基线：baseline 0.9000 / replay 1.0000 / Gain@10 = 0.1000（121 事件，三类齐）。
+- B3 audit ✅：feed ranking 完全没用 behavior_score 做 alpha gating，schema 准备好了但 ranking 路径绕过 → 已草拟 5 步实现 plan。
+- B4 audit ✅：22 个状态特征中只有 1 个 proxy + 1 个事件落地，其余加 mode_switch_score 全缺；多数缺项依赖 brief §14 没承诺的工程能力，主动收边界。
+- 已 ahead origin/main 4 个 commit（c847001 / 8c2c6d5 / d5e1a70 / e957cd5），未 push；仓库无 untracked 改动除 .claude/。
+- 容器和 backend 全停。
 
-直接从 gap-checklist 的"§0 环境前置"开始，照"推荐执行顺序"做。每完成一项立刻在文件末尾"Verification log"追加一行（日期 + item ID + 一句话结果）。
+当前活跃 plan 是：
+D:\Github\zhihurec\plan\zhihurec-v1-cold-start-mixing\
+（README.md + 5 个子题 markdown，全是文档，代码还没动）
+
+下一步选择（让用户挑）：
+A. 进入 cold-start-mixing step 1：启容器，按 01-schema-and-seed-verification.md 跑 SQL 校验（~5 min，纯验证不写代码）。
+B. 直接做 step 2：纯改 backend/app/config.py，加 4 参数 + compute_alpha 函数（~20 min，不需要容器）。
+C. step 1+2+3 一气呵成（~1h，做到 mixing 主体落库为止，step 4-5 留下次）。
+D. 暂不做 B3，按 gap-checklist 推荐执行顺序去做 A2 一键脚本 / C1 数据分析报告 / C2 HCI 报告 / C3 简历 bullet 之一。
 
 约束（不变）：
 - MySQL 是 V1 唯一在线运行时真源。
-- build/demo_world 只是离线导入包。
-- 不要引入 Redis、消息队列、登录、微服务、复杂前端框架。
+- build/demo_world 只是离线导入包，不在线读。
+- 不要引入 Redis / 消息队列 / 登录 / 微服务 / 复杂前端框架。
 - 不要 commit raw 数据或 build/demo_world 产物。
 - brief §18 是 V1 边界主文档，发现 plan 与 brief 冲突时优先改 brief。
+- 每完成一项立刻在 gap-checklist 末尾 "Verification log" 追加一行。
+- 写 commit 时拆成逻辑独立的小 commit；本地 ahead origin/main 时不主动 push（push 是用户独立决定）。
 ```
 
 ---
