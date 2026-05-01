@@ -796,3 +796,5 @@ Get-Content docs\v1_local_runbook.md | Select-String '2.5 Start MySQL via Docker
 - 2026-05-01 — A4 — brief §18 仓库基线已重写：frontend 已存在、MysqlRuntimeRepository 当前 active、新增 docker-compose.yml/runbook/scripts/plan 都已声明。
 - 2026-05-01 — D1 — runtime-closed-loop README 加入 2026-05-01 update 段，指向 gap-checklist。
 - 2026-05-01 — D2 — v1_local_runbook.md 在 §3 之前新增 §2.5 "Start MySQL via Docker Compose"。
+- 2026-05-01 — A1 — 用户在浏览器手动走完 feed/profile/search/click 闭环，behavior_score 上涨、recent_clicked_answers 首项更新，确认前端不只是 HTTP 200 而是 JS 跑通。
+- 2026-05-01 — B2 — `eval_replay_metrics.py --limit 0` 全 121 事件跑通：baseline_carryover@10=0.9000，replay_carryover@10=0.9750，**Gain@10=0.0750**（20 search + 101 rec_click，0 fail）。`--limit 50` 因为前 50 全是 rec_click 会得到 0/0/0，要用 limit 0；docs/v1_metrics.md 已写入首条基线行 + 高 baseline 的 caveat。
