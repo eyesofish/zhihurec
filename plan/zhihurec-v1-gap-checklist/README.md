@@ -787,6 +787,73 @@ Get-Content docs\v1_local_runbook.md | Select-String '2.5 Start MySQL via Docker
 
 ---
 
+## B3 冷启动混合实现状态（2026-05-01 audit）
+
+**结论：完全 gap**。Schema 准备好了（`sql/v1_schema.sql:162` 的 `system_profile_seed` 表 + `user_profile.cold_start_seed_key` FK 约束），数据准备好了（apply_demo_mysql 会种 `cold_start_default` 行），但 ranking 路径**没有用 behavior_score 做 alpha gating**。
+
+证据：
+- `backend/app/repositories/mysql.py:155` —— `final_score = base_score + topic_match_score + query_recall_boost`，三项简单相加，没有 `(1-alpha) * default_profile_score + alpha * personalized_profile_score` 形式。
+- `backend/app/repositories/mysql.py:127` 等处只把 `behavior_score` 读出来回传到 `FeedDebugPayload.profile_summary.behavior_score`，没有任何排序消费方。
+- `cold_start_seed_key` 只在 `_profile_from_row()` 里读出来塞进 `DebugProfileResponse`（`backend/app/repositories/mysql.py:449`），没有任何代码 join `system_profile_seed` 表来取默认 topic 分布。
+- 全仓 grep `alpha` 0 命中。
+
+按 brief §7（566-647 行）+ §18（1883-1885 行）这是明文要求的 V1 行为。**建议开新 plan `plan/zhihurec-v1-cold-start-mixing/` 实现**。详见本文件的"B3 后续 plan 提议"段。
+
+## B4 状态特征对照表（2026-05-01 audit）
+
+brief §1534-1607 列了 5 组共 22 个状态特征 + 1 个 `mode_switch_score` gating 机制，代码实现状态：
+
+| # | 组别 | brief 特征 | 代码实现位置 | 状态 |
+|---|------|------------|--------------|------|
+| 1.1 | 主动性上升 | recent_search_cnt_10m | — | ❌ 缺 |
+| 1.2 | 主动性上升 | recent_search_cnt_1d | — | ❌ 缺 |
+| 1.3 | 主动性上升 | search_after_feed_view_gap | — | ❌ 缺 |
+| 1.4 | 主动性上升 | search_session_ratio | — | ❌ 缺 |
+| 2.1 | feed 失配 | feed_ctr_drop_vs_baseline | — | ❌ 缺（且需要 impression 持久化基础） |
+| 2.2 | feed 失配 | feed_dwell_drop_vs_baseline | — | ❌ 缺（V1 没埋 dwell） |
+| 2.3 | feed 失配 | skip_streak | — | ❌ 缺 |
+| 2.4 | feed 失配 | impression_without_click_cnt_recent | — | ❌ 缺 |
+| 3.1 | search vs 画像 | query_topic_vs_user_profile_sim | `mysql.py:154` `query_recall_boost`（近似 proxy：用最近 query 的 topic 加权 boost candidates） | ⚠️ 部分 |
+| 3.2 | search vs 画像 | query_topic_vs_recent_feed_topic_sim | — | ❌ 缺 |
+| 3.3 | search vs 画像 | query_topic_novelty | — | ❌ 缺 |
+| 3.4 | search vs 画像 | category_switch_flag | — | ❌ 缺 |
+| 4.1 | query 强度 | query_len | — | ❌ 缺 |
+| 4.2 | query 强度 | query_has_specific_entity | — | ❌ 缺 |
+| 4.3 | query 强度 | query_has_filter_term | — | ❌ 缺 |
+| 4.4 | query 强度 | query_refine_from_prev_query | — | ❌ 缺 |
+| 4.5 | query 强度 | query_repeat_with_more_specific_terms | — | ❌ 缺 |
+| 5.1 | search 后反馈 | search_result_click（事件） | `mysql.py:780+` `record_search_result_click`，已写 `user_event` 表 | ✅ 事件落地（不作为 state feature 使用） |
+| 5.2 | search 后反馈 | search_to_dwell | — | ❌ 缺（V1 没埋 dwell） |
+| 5.3 | search 后反馈 | search_to_save_or_like | — | ❌ 缺（V1 无 save/like 接口，brief §14 也排除） |
+| 5.4 | search 后反馈 | search_to_conversion | — | ❌ 缺（同上） |
+| 5.5 | search 后反馈 | search_reformulation_cnt | — | ❌ 缺 |
+| ★ | gating | mode_switch_score = a·主动性 + b·失配 + c·偏离 + d·query 明确度 | — | ❌ 缺，无任何状态分数变量 |
+
+**真实编排能力评估**：
+
+- 唯一已落地的 state-like 信号是 `query_recall_boost`（`mysql.py:154`），它把 user 最近 5 条 query 的 topic 拉出来给 candidate 做 topic 加权，本质上是 brief 3.1 `query_topic_vs_user_profile_sim` 的弱化版（不是 sim，是 boost），但**作为常数加性项写死**，没有任何 gating（state score）来调它的权重。
+- brief §1611 描述的 `mode_switch_score` 完全不存在，所以也无法做"分数低/中/高"三档行为。
+- 第 1、2、4 组特征大多需要 brief §14 没承诺的工程能力（impression 持久化、dwell time 埋点、query 解析），属于**超出 V1 当前明确的非承诺范围**。
+- 第 3 组的部分特征（如 `query_topic_novelty`、`category_switch_flag`）只需要现有 `topic_weights` + `query_topic_map`，**是低成本可补的**。
+- 第 5 组的 `search_result_click` 事件已经记录在 `user_event` 表（B1 改完后 replay 也覆盖到了），但它当前**只更新画像**（`mysql.py:805` 改 behavior_score），**没作为 state feature 进入 ranking**。
+
+**建议**（不要直接动手）：
+
+1. 待用户确认后，再决定是补 mode_switch_score（含 3.1/3.2/3.3/3.4 一组 + 5.1/5.5）还是先专心做 B3 cold-start mixing。
+2. brief §14 排除了"完整双塔训练 / dwell / save / 多用户系统"，所以 B4 范围应主动向 brief §14 边界对齐，**不要把第 1、2、4 组都接进来**。
+
+## B3 后续 plan 提议（2026-05-01 草拟，待用户确认）
+
+如果 OK，下一会话开新目录 `plan/zhihurec-v1-cold-start-mixing/`，拆 4 步：
+
+1. **schema 校验**：确认 `system_profile_seed` 表里有 `cold_start_default` 行，且 `topic_weights_json` 是 demo world 全局 topic 分布（不是空表）。如缺，改 `apply_demo_mysql.py` 或 demo 导入步骤。
+2. **alpha 函数 + settings**：在 `backend/app/config.py` 增加 `cold_start_alpha_floor` / `cold_start_alpha_ceiling` / `cold_start_behavior_score_scale` 等参数；定义 `compute_alpha(behavior_score) -> float ∈ [0,1]` 单调递增、平滑。
+3. **mixing 实现**：`backend/app/repositories/mysql.py:155` 把 `topic_match_score` 拆成 `personalized_topic_score`（用 user `topic_weights`）和 `default_topic_score`（用 `system_profile_seed.topic_weights_json`），按 `alpha` 线性混合。
+4. **debug 暴露**：`FeedDebugPayload` 加 `cold_start_mix: {alpha, behavior_score, default_seed_key}`；`/feed?debug=true` 能直接看到。
+5. **eval rerun**：跑 `eval_replay_metrics.py`，预期 baseline 下降（fresh user 现在更靠默认画像，不是已经 warm 的画像）、replay carryover 下降幅度更小（个性化更滞后），Gain@K 可能上升也可能下降，但**意义更真**。
+
+成本估计：1-2h 实现 + 0.5h debug 暴露 + 0.5h 写 plan README 与 verification 流程。
+
 ## Verification log
 
 每次会话做完一项后，在这里追加一行：`YYYY-MM-DD - <item ID> - <一句话结果>`。
@@ -800,3 +867,5 @@ Get-Content docs\v1_local_runbook.md | Select-String '2.5 Start MySQL via Docker
 - 2026-05-01 — B2 — `eval_replay_metrics.py --limit 0` 全 121 事件跑通：baseline_carryover@10=0.9000，replay_carryover@10=0.9750，**Gain@10=0.0750**（20 search + 101 rec_click，0 fail）。`--limit 50` 因为前 50 全是 rec_click 会得到 0/0/0，要用 limit 0；docs/v1_metrics.md 已写入首条基线行 + 高 baseline 的 caveat。
 - 2026-05-01 — B1 — `scripts/build_demo_world.py --search-window-seconds` 默认值 300 → 14400（4h），原因：demo 用户 query→click 最小间隔 ~3h，300s 窗口零命中导致 replay 缺 search_result_click 类。重生成后 replay 三类齐：80 rec_click / 20 search / 21 s-click（121 总）。
 - 2026-05-01 — B2-rerun — 三类齐后重跑 eval：baseline 0.9000 / replay **1.0000** / **Gain@10 = 0.1000**，跨过 0.10 strong-signal 门槛。docs/v1_metrics.md 加第二行基线。
+- 2026-05-01 — B3 audit — 完全 gap，feed 排序无 alpha gating，仓库无 `alpha` 字段。schema/seed 已就绪但被路径绕过。详见上方"B3 冷启动混合实现状态"段；plan 草案见"B3 后续 plan 提议"段。
+- 2026-05-01 — B4 audit — 22 个 brief 状态特征中 1 个有近似 proxy（`query_recall_boost`）、1 个有事件落地（`search_result_click`）、20 个完全缺；`mode_switch_score` gating 完全不存在。详见上方"B4 状态特征对照表"段。建议先收 B3，B4 由用户决定要不要做最低成本子集。
