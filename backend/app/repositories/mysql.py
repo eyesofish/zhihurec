@@ -6,7 +6,7 @@ import time
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from backend.app.config import Settings
+from backend.app.config import Settings, compute_alpha
 from backend.app.errors import RepositoryNotReadyError
 from backend.app.repositories.base import RuntimeRepository
 from backend.app.schemas.common import AuthorCard, TopicCard
@@ -110,6 +110,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
             profile = self._profile_from_row(profile_row)
             topic_weight_map = {item.topic_id: item.weight for item in profile.topic_weights}
             query_topic_scores = self._load_recent_query_topic_scores(connection, profile.recent_queries)
+            default_topic_weight_map = self._load_default_seed_topic_weights(
+                connection,
+                seed_key=profile.cold_start_seed_key or self._settings.cold_start_default_seed_key,
+            )
+            alpha = compute_alpha(profile.behavior_score, self._settings)
 
             candidates = self._load_feed_candidates(
                 connection=connection,
@@ -150,7 +155,16 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 topics = topics_by_answer.get(answer_id, [])
                 topic_ids = {topic.topic_id for topic in topics}
                 base_score = round(float(row.get("hot_score") or candidate["raw_base_score"] or 0) / max_hot_score, 6)
-                topic_match_score = round(sum(topic_weight_map.get(topic_id, 0.0) for topic_id in topic_ids), 6)
+                personalized_topic_score = round(
+                    sum(topic_weight_map.get(topic_id, 0.0) for topic_id in topic_ids), 6
+                )
+                default_topic_score = round(
+                    sum(default_topic_weight_map.get(topic_id, 0.0) for topic_id in topic_ids), 6
+                )
+                topic_match_score = round(
+                    alpha * personalized_topic_score + (1.0 - alpha) * default_topic_score,
+                    6,
+                )
                 query_recall_boost = round(sum(query_topic_scores.get(topic_id, 0.0) for topic_id in topic_ids), 6)
                 final_score = round(base_score + topic_match_score + query_recall_boost, 6)
                 sources = sorted(candidate["sources"])
@@ -456,6 +470,27 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 top_contributing_topics=topic_weights,
             ),
         )
+
+    def _load_default_seed_topic_weights(
+        self,
+        connection: Any,
+        *,
+        seed_key: str,
+    ) -> dict[int, float]:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT topic_weights_json
+                FROM system_profile_seed
+                WHERE seed_key = %s
+                """,
+                (seed_key,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return {}
+        weights = self._parse_topic_weights(row.get("topic_weights_json"))
+        return {item.topic_id: item.weight for item in weights}
 
     def _load_recent_query_topic_scores(
         self,
