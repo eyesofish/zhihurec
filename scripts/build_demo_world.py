@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-recent-clicks", type=int, default=10, help="Maximum recent clicked answers stored in the demo user seed.")
     parser.add_argument("--max-recent-queries", type=int, default=5, help="Maximum recent queries stored in the demo user seed.")
     parser.add_argument("--max-replay-events", type=int, default=200, help="Maximum replay events written for the demo user.")
-    parser.add_argument("--search-window-seconds", type=int, default=300, help="Heuristic window for classifying a click as search-result click.")
+    parser.add_argument("--search-window-seconds", type=int, default=14400, help="Heuristic window for classifying a click as search-result click. Default 14400s (4h) reflects the sparse demo activity: queries and follow-up clicks tend to fall in the same evening; 300s caught zero clicks on the current demo user.")
     return parser.parse_args()
 
 

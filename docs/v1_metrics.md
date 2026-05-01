@@ -49,6 +49,7 @@ and `carryover_gain_at_k`.
 | Date       | K  | Limit | baseline | replay | gain   | events_posted (rec / search / s-click) | Notes                                                               |
 |------------|----|-------|----------|--------|--------|----------------------------------------|---------------------------------------------------------------------|
 | 2026-05-01 | 10 | 0 (all 121) | 0.9000   | 0.9750 | 0.0750 | 101 / 20 / 0                           | First real baseline. `--limit 50` produced 0/0/0 because all 50 earliest events are `recommendation_click` — must use `--limit 0` (full replay) until B1 expands the event mix. |
+| 2026-05-01 | 10 | 0 (all 121) | 0.9000   | 1.0000 | 0.1000 | 80 / 20 / 21                           | After B1: bumped `--search-window-seconds` default from 300 → 14400 in `scripts/build_demo_world.py`; replay now covers all three event types (brief §17). Gain crosses the 0.10 "strong signal" threshold — quotable in resume bullet. |
 
 ## Interpretation
 
