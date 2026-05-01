@@ -888,3 +888,6 @@ brief §1534-1607 列了 5 组共 22 个状态特征 + 1 个 `mode_switch_score`
 - 2026-05-01 — B2-rerun — 三类齐后重跑 eval：baseline 0.9000 / replay **1.0000** / **Gain@10 = 0.1000**，跨过 0.10 strong-signal 门槛。docs/v1_metrics.md 加第二行基线。
 - 2026-05-01 — B3 audit — 完全 gap，feed 排序无 alpha gating，仓库无 `alpha` 字段。schema/seed 已就绪但被路径绕过。详见上方"B3 冷启动混合实现状态"段；plan 草案见"B3 后续 plan 提议"段。
 - 2026-05-01 — B4 audit — 22 个 brief 状态特征中 1 个有近似 proxy（`query_recall_boost`）、1 个有事件落地（`search_result_click`）、20 个完全缺；`mode_switch_score` gating 完全不存在。详见上方"B4 状态特征对照表"段。建议先收 B3，B4 由用户决定要不要做最低成本子集。
+- 2026-05-01 — B3-impl step 1 — `system_profile_seed.cold_start_default` 行 10 topics + 用户 7248 FK JOIN 通过；schema 与种子一致，无需修脚本。
+- 2026-05-01 — B3-impl step 2 — `backend/app/config.py` 增 4 个 cold-start 参数 + `ZHIHUREC_COLD_START_*` env overrides + `compute_alpha(behavior_score, settings)`；sanity（floor/mid/demo/big）= 0.1 / 0.525 / 0.885 / 0.9499 全部在区间内。
+- 2026-05-01 — B3-impl step 3 — `MysqlRuntimeRepository.get_feed` 接入 alpha 混合：每请求一次 `_load_default_seed_topic_weights` + 一次 `compute_alpha`；per-candidate `topic_match_score = α * personalized + (1-α) * default`，`final_score` 形状不变。`/healthz` 仍 `repository_backend: mysql`，`/feed?user_id=7248&page_size=3` 返回 3 条，topic_match_score 全非零。step 4-5 留下次会话。

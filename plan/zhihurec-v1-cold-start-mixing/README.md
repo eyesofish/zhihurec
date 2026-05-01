@@ -8,9 +8,9 @@ After this plan completes, `/feed?debug=true` should expose an `alpha`, the sche
 This plan does not introduce new event types, retraining loops, multi-user infra, or replacement of the recall layer. It only changes the topic-weight mixing inside `MysqlRuntimeRepository.get_feed`.
 
 ## Subproblems
-1. `01-schema-and-seed-verification.md` — confirm the seed row is correctly populated and reachable from Python before any ranking change — status: pending
-2. `02-alpha-function-and-settings.md` — add `compute_alpha(behavior_score)` plus tunable settings to `backend/app/config.py` — status: pending
-3. `03-feed-ranking-mixing.md` — change `MysqlRuntimeRepository.get_feed` to mix `topic_weights` via alpha — status: pending
+1. `01-schema-and-seed-verification.md` — confirm the seed row is correctly populated and reachable from Python before any ranking change — status: completed (2026-05-01)
+2. `02-alpha-function-and-settings.md` — add `compute_alpha(behavior_score)` plus tunable settings to `backend/app/config.py` — status: completed (2026-05-01)
+3. `03-feed-ranking-mixing.md` — change `MysqlRuntimeRepository.get_feed` to mix `topic_weights` via alpha — status: completed (2026-05-01)
 4. `04-debug-payload-cold-start-mix.md` — extend `FeedDebugPayload` so `/feed?debug=true` shows `alpha`, `behavior_score`, `default_seed_key`, and per-item `default_topic_score` / `personalized_topic_score` — status: pending
 5. `05-eval-rerun-and-doc-update.md` — rerun `eval_replay_metrics.py`, append a third row to `docs/v1_metrics.md`, and update `project_brief_zh.md` §18 to point at this plan — status: pending
 
@@ -47,7 +47,10 @@ After all five steps, the following all hold:
 - Do not re-touch `query_recall_boost`. It is an intent signal and stays as an additive term, independent of alpha. (Brief §7 vs §11 separates cold-start mixing from intent gating.)
 
 ## Current status
-Not started. Plan drafted on 2026-05-01 against gap-checklist B3 audit.
+- 2026-05-01 — step 1 verified: `system_profile_seed.cold_start_default` has 10 topics, `behavior_score=0`; demo user 7248 references it cleanly via FK (`JOIN` returns 1 row, `seed_topic_n=10`).
+- 2026-05-01 — step 2 done: `backend/app/config.py` has `cold_start_alpha_floor=0.1`, `cold_start_alpha_ceiling=0.95`, `cold_start_behavior_score_scale=30.0`, `cold_start_default_seed_key='cold_start_default'` plus `ZHIHUREC_COLD_START_*` env overrides and `compute_alpha(behavior_score, settings)`. Sanity values: floor→0.1, mid(score=30)→0.525, demo(score=365)→0.885, big(1e6)→0.9499 (< ceiling).
+- 2026-05-01 — step 3 done: `MysqlRuntimeRepository.get_feed` now loads the seed row once via `_load_default_seed_topic_weights`, computes `alpha = compute_alpha(profile.behavior_score, settings)`, and per candidate emits `topic_match_score = round(alpha * personalized_topic_score + (1-alpha) * default_topic_score, 6)`. `final_score = base_recall_score + topic_match_score + query_recall_boost` shape unchanged. Live `/feed?user_id=7248&page_size=3` on the running container returned 200 with non-trivial `topic_match_score` on every item.
+- Step 4 (debug payload exposure) and step 5 (eval rerun + doc updates) deferred to a later session per gap-checklist option C scope.
 
 ## Resume prompt
 Use this prompt at the start of the next session if cold-start mixing is the chosen next item:
