@@ -905,3 +905,4 @@ brief §1534-1607 列了 5 组共 22 个状态特征 + 1 个 `mode_switch_score`
 - 2026-05-02 — C1-step2 — topic 空间分析完成：`scripts/eda.py --sections topic` 生成 `docs/figs/05_*.png` 到 `07_*.png` 并填充 `docs/data_analysis_report.md` §3；top 100 topic 覆盖 29.7463% 的加权 topic 曝光，Topic 46 最高（45,249）。
 - 2026-05-02 — C1-step3 — query 行为分析完成：`scripts/eda.py --sections query` 生成 `docs/figs/08_*.png` 到 `11_*.png` 并填充 `docs/data_analysis_report.md` §4；query 中位长度 2 tokens，35.4667% query 前 10 分钟有同用户 feed 曝光，39.6466% query 后 4 小时内有启发式点击。
 - 2026-05-02 — C1 — 可视化数据分析报告完成：`scripts/eda.py` 无参数可重生成 `docs/data_analysis_report.md` §1-7、`docs/figs/01_*.png` 到 `12_*.png` 和 `eda_summary.json`；报告已对齐 brief §1 搜索反哺推荐 hook、`docs/v1_metrics.md` 的 Gain@10=+0.1000 证据和 demo world 边界。
+- 2026-05-02 — C2-step1 — `docs/hci_report.md` §1-3 落地：问题陈述对齐 brief §1 Step 1-4 递进，用户画像引用 C1 §2/§4 真实数字（5,047/7,974 用户发起过 query、query 中位长度 2 tokens、35.4667% query 接 feed），设计目标 G1-G5 同时覆盖用户感知和调试可见性；§4-8 仍是骨架，后续会话补足。
