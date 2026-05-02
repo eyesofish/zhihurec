@@ -1,5 +1,21 @@
 # ZhihuRec V1 Local Runbook
 
+## 0. One-Shot Local Bootstrap
+
+```powershell
+.\scripts\init_local.ps1
+```
+
+This runs the local demo setup in one path: starts MySQL via Docker Compose, applies schema and demo seed data, resets the demo user, starts the FastAPI backend on `http://127.0.0.1:8000`, and starts the static debug frontend on `http://127.0.0.1:5173`.
+
+For a non-interactive verification run that starts backend/frontend, checks the endpoints, and then stops only those child processes:
+
+```powershell
+.\scripts\init_local.ps1 -SmokeTest
+```
+
+Use the explicit per-step flow below only when debugging one part of the setup.
+
 ## 1. Install Backend Dependencies
 
 ```powershell

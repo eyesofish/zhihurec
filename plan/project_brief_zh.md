@@ -1978,6 +1978,8 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 - 用户执行一次脚本后，应能直接进入可调试、可演示的前后端运行状态。
 - 如果某些启动步骤因本地环境差异需要分平台处理，也应由同一入口脚本统一编排，而不是让用户手工拼接多个命令。
 
+当前实现入口：`scripts/init_local.ps1`（Windows / PowerShell）。后续如要跨平台，再补 `scripts/init_local.sh`，但不要改变这个 Windows 入口的语义。
+
 此外，`V1` 还应提供：
 
 > 开发脚本形式的一键重置能力
@@ -2186,7 +2188,7 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 - 已存在 `frontend/`，包含 `index.html`、`app.js`、`styles.css`、`README.md`，作为只服务后端调试与演示的极简前端，由 `python -m http.server 5173 -d frontend` 静态服务。
 - 已存在 `backend/app/repositories/mysql.py`（`MysqlRuntimeRepository`），当 `ZHIHUREC_DATABASE_URL` 配置时自动作为 active repository；`UnwiredRuntimeRepository` 退化为缺省 fallback。
 - 已存在 `docker-compose.yml`（仓库根），用 `mysql:8.0` 提供本机 MySQL，端口 3306，DB `zhihurec_demo`，账号 root/root，volume `zhihurec_zhihurec_mysql_data` 持久化。
-- 已存在 `docs/v1_local_runbook.md`、`scripts/apply_demo_mysql.py`、`scripts/reset_demo_user.py`、`scripts/replay_demo_events.py`，构成本地一键初始化与离线回放的最小工具集。
+- 已存在 `docs/v1_local_runbook.md`、`scripts/init_local.ps1`、`scripts/apply_demo_mysql.py`、`scripts/reset_demo_user.py`、`scripts/replay_demo_events.py`，构成本地一键初始化与离线回放的最小工具集。
 - 已存在 `plan/zhihurec-v1-runtime-closed-loop/`（runtime 闭环执行计划，全部 7 步已 verified）和 `plan/zhihurec-v1-gap-checklist/`（冷启动续接清单 + 傻瓜操作手册）。
 - 已存在 `plan/zhihurec-v1-cold-start-mixing/`，其中 5 步已经完成：schema/seed 校验、alpha 函数、feed ranking 混合、debug payload 暴露和 eval rerun。
 

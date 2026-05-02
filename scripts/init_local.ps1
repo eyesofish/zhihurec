@@ -1,0 +1,242 @@
+<# One-shot local bootstrap for the ZhihuRec V1 demo environment. #>
+[CmdletBinding()]
+param(
+    [string]$Python = 'C:\ProgramData\anaconda3\python.exe',
+    [string]$DatabaseUrl = 'mysql+pymysql://root:root@localhost:3306/zhihurec_demo',
+    [int]$BackendPort = 8000,
+    [int]$FrontendPort = 5173,
+    [int]$MysqlHealthTimeoutSeconds = 120,
+    [switch]$SkipBackend,
+    [switch]$SkipFrontend,
+    [switch]$SmokeTest
+)
+
+$ErrorActionPreference = 'Stop'
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$runtimeDir = Join-Path $repoRoot '.runtime\init_local'
+$startedProcesses = New-Object System.Collections.Generic.List[object]
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Cyan
+}
+
+function Invoke-External {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [string]$Label
+    )
+
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Test-ListeningPort {
+    param([int]$Port)
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    return $listeners.Count -gt 0
+}
+
+function Wait-MysqlHealthy {
+    param([int]$TimeoutSeconds)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $status = (& docker inspect -f '{{.State.Health.Status}}' zhihurec-mysql 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            $status = ''
+        }
+        if ($status -eq 'healthy') {
+            Write-Host '  MySQL is healthy' -ForegroundColor Green
+            return
+        }
+        Write-Host "  mysql health: $status"
+        Start-Sleep -Seconds 3
+    } while ((Get-Date) -lt $deadline)
+
+    throw "MySQL did not become healthy within $TimeoutSeconds seconds"
+}
+
+function Start-LocalService {
+    param(
+        [string]$Name,
+        [string[]]$Arguments,
+        [int]$Port
+    )
+
+    if (Test-ListeningPort -Port $Port) {
+        throw "$Name port $Port is already in use. Stop the existing service or choose another port."
+    }
+
+    $stdout = Join-Path $runtimeDir "$Name.out.log"
+    $stderr = Join-Path $runtimeDir "$Name.err.log"
+    Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+
+    $process = Start-Process `
+        -FilePath $Python `
+        -ArgumentList $Arguments `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $stdout `
+        -RedirectStandardError $stderr `
+        -WindowStyle Hidden `
+        -PassThru
+
+    Start-Sleep -Seconds 1
+    if ($process.HasExited) {
+        $errText = ''
+        if (Test-Path $stderr) {
+            $errText = (Get-Content $stderr -ErrorAction SilentlyContinue | Select-Object -Last 20) -join [Environment]::NewLine
+        }
+        throw "$Name exited during startup. See $stderr. $errText"
+    }
+
+    $entry = [pscustomobject]@{
+        Name = $Name
+        Process = $process
+        Port = $Port
+        Stdout = $stdout
+        Stderr = $stderr
+    }
+    $startedProcesses.Add($entry) | Out-Null
+    Write-Host "  $Name pid=$($process.Id) url=http://127.0.0.1:$Port"
+    Write-Host "  logs: $stdout ; $stderr"
+}
+
+function Stop-StartedProcesses {
+    foreach ($entry in $startedProcesses) {
+        try {
+            if (-not $entry.Process.HasExited) {
+                Stop-Process -Id $entry.Process.Id -Force -ErrorAction SilentlyContinue
+                Write-Host "  stopped $($entry.Name) pid=$($entry.Process.Id)"
+            }
+        } catch {
+            Write-Warning "Could not stop $($entry.Name): $($_.Exception.Message)"
+        }
+    }
+}
+
+function Wait-JsonEndpoint {
+    param(
+        [string]$Name,
+        [string]$Url,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        try {
+            $response = Invoke-RestMethod -Uri $Url -TimeoutSec 3
+            Write-Host "  $Name OK" -ForegroundColor Green
+            return $response
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+    } while ((Get-Date) -lt $deadline)
+
+    throw "$Name did not respond at $Url within $TimeoutSeconds seconds"
+}
+
+function Wait-HttpEndpoint {
+    param(
+        [string]$Name,
+        [string]$Url,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        try {
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3
+            if ($response.StatusCode -lt 400) {
+                Write-Host "  $Name OK" -ForegroundColor Green
+                return
+            }
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+    } while ((Get-Date) -lt $deadline)
+
+    throw "$Name did not respond at $Url within $TimeoutSeconds seconds"
+}
+
+Set-Location $repoRoot
+New-Item -ItemType Directory -Force $runtimeDir | Out-Null
+
+Write-Step '[1/6] Checking prerequisites'
+if (($Python.Contains('\') -or $Python.Contains(':')) -and -not (Test-Path $Python)) {
+    throw "Python executable not found: $Python"
+}
+Invoke-External -FilePath $Python -Arguments @('--version') -Label 'Python check'
+Invoke-External -FilePath 'docker' -Arguments @('--version') -Label 'Docker check'
+Invoke-External -FilePath 'docker' -Arguments @('compose', 'version') -Label 'Docker Compose check'
+
+Write-Step '[2/6] Starting MySQL via docker compose'
+Invoke-External -FilePath 'docker' -Arguments @('compose', 'up', '-d') -Label 'docker compose up'
+Wait-MysqlHealthy -TimeoutSeconds $MysqlHealthTimeoutSeconds
+
+Write-Step '[3/6] Setting ZHIHUREC_DATABASE_URL for child processes'
+$env:ZHIHUREC_DATABASE_URL = $DatabaseUrl
+
+Write-Step '[4/6] Applying schema and demo seed'
+Invoke-External -FilePath $Python -Arguments @('scripts\apply_demo_mysql.py') -Label 'apply_demo_mysql.py'
+
+Write-Step '[5/6] Resetting demo user profile'
+Invoke-External -FilePath $Python -Arguments @('scripts\reset_demo_user.py') -Label 'reset_demo_user.py'
+
+Write-Step '[6/6] Launching services'
+try {
+    if (-not $SkipBackend) {
+        Start-LocalService `
+            -Name 'backend' `
+            -Arguments @('-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', "$BackendPort") `
+            -Port $BackendPort
+    }
+
+    if (-not $SkipFrontend) {
+        Start-LocalService `
+            -Name 'frontend' `
+            -Arguments @('-m', 'http.server', "$FrontendPort", '-d', 'frontend') `
+            -Port $FrontendPort
+    }
+
+    if (-not $SkipBackend) {
+        $health = Wait-JsonEndpoint -Name 'Backend health' -Url "http://127.0.0.1:$BackendPort/healthz"
+        Write-Host "  repository_backend=$($health.repository_backend)"
+        Wait-JsonEndpoint -Name 'Debug profile' -Url "http://127.0.0.1:$BackendPort/debug/profile?user_id=7248" | Out-Null
+        Wait-JsonEndpoint -Name 'Debug feed' -Url "http://127.0.0.1:$BackendPort/feed?user_id=7248&page_size=10&debug=true" | Out-Null
+    }
+
+    if (-not $SkipFrontend) {
+        Wait-HttpEndpoint -Name 'Frontend' -Url "http://127.0.0.1:$FrontendPort/"
+    }
+
+    Write-Host ''
+    Write-Host 'Ready.' -ForegroundColor Green
+    if (-not $SkipBackend) {
+        Write-Host "  Backend:  http://127.0.0.1:$BackendPort"
+    }
+    if (-not $SkipFrontend) {
+        Write-Host "  Frontend: http://127.0.0.1:$FrontendPort"
+    }
+    Write-Host "  MySQL:    $DatabaseUrl"
+
+    if ($SmokeTest) {
+        Write-Host 'Smoke test passed. Stopping backend/frontend started by this script.' -ForegroundColor Green
+    } else {
+        Write-Host 'Press Ctrl+C to stop backend/frontend. MySQL is left running; use docker compose down to stop it.' -ForegroundColor Yellow
+        $ids = @($startedProcesses | ForEach-Object { $_.Process.Id })
+        if ($ids.Count -gt 0) {
+            Wait-Process -Id $ids
+        }
+    }
+} finally {
+    if ($SmokeTest) {
+        Stop-StartedProcesses
+    } elseif ($startedProcesses.Count -gt 0) {
+        Stop-StartedProcesses
+    }
+}

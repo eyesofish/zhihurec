@@ -76,7 +76,9 @@ docker compose down   # 容器和 network 清掉，volume 保留
 
 ---
 
-### A2. 一键初始化脚本 ✅未做
+### A2. 一键初始化脚本 ✅完成
+
+**当前实现**：`scripts/init_local.ps1` 已落地；默认模式会拉起 MySQL、重置 demo user、启动 backend/frontend 并等待 Ctrl+C；`-SmokeTest` 模式会自动验证 `/healthz`、`/debug/profile`、`/feed?debug=true` 和前端根页面，然后停止自己启动的 backend/frontend。
 
 **为什么必修**：brief §14 明文要求"要有一键初始化脚本"，"用户执行一次脚本后，应能直接进入可调试、可演示的前后端运行状态"。当前 §0 那一坨 6 条命令就是这一项的反面。
 
@@ -898,3 +900,4 @@ brief §1534-1607 列了 5 组共 22 个状态特征 + 1 个 `mode_switch_score`
 - 2026-05-01 — B3-impl step 4 — `FeedDebugPayload` 新增 `cold_start_mix`，`FeedItemScores` 新增 `personalized_topic_score/default_topic_score`；schema import 检查通过，`/feed?debug=true` 可直接解释混合权重。
 - 2026-05-01 — B3-impl step 5 — 真实 docker MySQL + uvicorn eval 跑通：`cold_start_mix.alpha=0.885443`、`behavior_score=365`、10 条 debug item 中 7 条有非零 `default_topic_score`；`eval_replay_metrics.py --limit 0` 得到 baseline 0.9000 / replay 1.0000 / **Gain@10 = 0.1000**；`docs/v1_metrics.md` 加第三行基线，`docs/v1_api_contract.md` 同步 feed 响应字段。
 - 2026-05-01 — C3 — `docs/resume_bullet.md` 已落地：英文简历 bullet、中文版本、1 分钟面试讲述、证据口径和边界声明都已补齐，使用 B2/B3 的真实数字（Gain@10=+0.1000，121 replay events，alpha=0.885443）。
+- 2026-05-02 — A2 — `scripts/init_local.ps1 -SmokeTest` 跑通：Docker MySQL healthy，schema/seed apply 成功，demo user reset 成功，backend `/healthz` 为 `repository_backend=mysql`，`/debug/profile`、`/feed?debug=true` 和前端 `http://127.0.0.1:5173/` 均通过；backend/frontend 已由脚本清理。
