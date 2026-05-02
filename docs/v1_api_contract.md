@@ -79,6 +79,8 @@ GET /feed?user_id=123&page_size=10&debug=true
       "selected_reason": "Selected because topic match and recent-query boost aligned.",
       "scores": {
         "base_recall_score": 0.812,
+        "personalized_topic_score": 0.161,
+        "default_topic_score": 0.029,
         "topic_match_score": 0.174,
         "query_recall_boost": 0.091,
         "final_score": 1.077
@@ -101,7 +103,13 @@ GET /feed?user_id=123&page_size=10&debug=true
         "base_recall_score": 0.812
       }
     ],
-    "fallback_used": false
+    "fallback_used": false,
+    "cold_start_mix": {
+      "alpha": 0.885443,
+      "behavior_score": 365.0,
+      "default_seed_key": "cold_start_default",
+      "default_topic_count": 10
+    }
   }
 }
 ```

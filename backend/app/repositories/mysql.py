@@ -23,6 +23,7 @@ from backend.app.schemas.event import (
     UpdatedTopicDelta,
 )
 from backend.app.schemas.feed import (
+    ColdStartMix,
     FeedDebugPayload,
     FeedItem,
     FeedItemScores,
@@ -110,11 +111,18 @@ class MysqlRuntimeRepository(RuntimeRepository):
             profile = self._profile_from_row(profile_row)
             topic_weight_map = {item.topic_id: item.weight for item in profile.topic_weights}
             query_topic_scores = self._load_recent_query_topic_scores(connection, profile.recent_queries)
+            default_seed_key = profile.cold_start_seed_key or self._settings.cold_start_default_seed_key
             default_topic_weight_map = self._load_default_seed_topic_weights(
                 connection,
-                seed_key=profile.cold_start_seed_key or self._settings.cold_start_default_seed_key,
+                seed_key=default_seed_key,
             )
             alpha = compute_alpha(profile.behavior_score, self._settings)
+            cold_start_mix = ColdStartMix(
+                alpha=round(alpha, 6),
+                behavior_score=round(profile.behavior_score, 6),
+                default_seed_key=default_seed_key,
+                default_topic_count=len(default_topic_weight_map),
+            )
 
             candidates = self._load_feed_candidates(
                 connection=connection,
@@ -134,6 +142,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                         ),
                         recall_candidates=[],
                         fallback_used=False,
+                        cold_start_mix=cold_start_mix,
                     )
                     if debug
                     else None,
@@ -187,6 +196,8 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     ),
                     scores=FeedItemScores(
                         base_recall_score=base_score,
+                        personalized_topic_score=personalized_topic_score,
+                        default_topic_score=default_topic_score,
                         topic_match_score=topic_match_score,
                         query_recall_boost=query_recall_boost,
                         final_score=final_score,
@@ -221,6 +232,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     ),
                     recall_candidates=[pair[1] for pair in scored_items[:50]],
                     fallback_used=fallback_used,
+                    cold_start_mix=cold_start_mix,
                 )
                 if debug
                 else None,

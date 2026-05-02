@@ -6,6 +6,8 @@ from .profile import ProfileTopicWeight
 
 class FeedItemScores(ApiModel):
     base_recall_score: float
+    personalized_topic_score: float
+    default_topic_score: float
     topic_match_score: float
     query_recall_boost: float
     final_score: float
@@ -35,10 +37,18 @@ class RecallCandidateDebug(ApiModel):
     base_recall_score: float
 
 
+class ColdStartMix(ApiModel):
+    alpha: float
+    behavior_score: float
+    default_seed_key: str
+    default_topic_count: int
+
+
 class FeedDebugPayload(ApiModel):
     profile_summary: FeedProfileSummary
     recall_candidates: list[RecallCandidateDebug]
     fallback_used: bool
+    cold_start_mix: ColdStartMix
 
 
 class FeedResponse(ApiModel):

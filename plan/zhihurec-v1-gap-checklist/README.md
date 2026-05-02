@@ -806,9 +806,11 @@ D. 暂不做 B3，按 gap-checklist 推荐执行顺序去做 A2 一键脚本 / C
 
 ---
 
-## B3 冷启动混合实现状态（2026-05-01 audit）
+## B3 冷启动混合实现状态（2026-05-01 audit, closed 2026-05-01 by zhihurec-v1-cold-start-mixing）
 
-**结论：完全 gap**。Schema 准备好了（`sql/v1_schema.sql:162` 的 `system_profile_seed` 表 + `user_profile.cold_start_seed_key` FK 约束），数据准备好了（apply_demo_mysql 会种 `cold_start_default` 行），但 ranking 路径**没有用 behavior_score 做 alpha gating**。
+**关闭结论**：B3 已由 `plan/zhihurec-v1-cold-start-mixing/` 完成。当前 `MysqlRuntimeRepository.get_feed` 已经用 `behavior_score -> alpha` 混合 personalized/default topic score，`/feed?debug=true` 已暴露 `cold_start_mix`。下面保留的是 2026-05-01 实现前 audit 记录。
+
+**原 audit 结论：完全 gap**。Schema 准备好了（`sql/v1_schema.sql:162` 的 `system_profile_seed` 表 + `user_profile.cold_start_seed_key` FK 约束），数据准备好了（apply_demo_mysql 会种 `cold_start_default` 行），但 ranking 路径**没有用 behavior_score 做 alpha gating**。
 
 证据：
 - `backend/app/repositories/mysql.py:155` —— `final_score = base_score + topic_match_score + query_recall_boost`，三项简单相加，没有 `(1-alpha) * default_profile_score + alpha * personalized_profile_score` 形式。
@@ -861,7 +863,9 @@ brief §1534-1607 列了 5 组共 22 个状态特征 + 1 个 `mode_switch_score`
 1. 待用户确认后，再决定是补 mode_switch_score（含 3.1/3.2/3.3/3.4 一组 + 5.1/5.5）还是先专心做 B3 cold-start mixing。
 2. brief §14 排除了"完整双塔训练 / dwell / save / 多用户系统"，所以 B4 范围应主动向 brief §14 边界对齐，**不要把第 1、2、4 组都接进来**。
 
-## B3 后续 plan 提议（2026-05-01 草拟，待用户确认）
+## B3 后续 plan（2026-05-01 已完成）
+
+完成入口：`plan/zhihurec-v1-cold-start-mixing/`。5 步全部完成；收尾 eval 为 baseline 0.9000 / replay 1.0000 / Gain@10 0.1000，debug alpha=0.885443。
 
 如果 OK，下一会话开新目录 `plan/zhihurec-v1-cold-start-mixing/`，拆 4 步：
 
@@ -891,3 +895,5 @@ brief §1534-1607 列了 5 组共 22 个状态特征 + 1 个 `mode_switch_score`
 - 2026-05-01 — B3-impl step 1 — `system_profile_seed.cold_start_default` 行 10 topics + 用户 7248 FK JOIN 通过；schema 与种子一致，无需修脚本。
 - 2026-05-01 — B3-impl step 2 — `backend/app/config.py` 增 4 个 cold-start 参数 + `ZHIHUREC_COLD_START_*` env overrides + `compute_alpha(behavior_score, settings)`；sanity（floor/mid/demo/big）= 0.1 / 0.525 / 0.885 / 0.9499 全部在区间内。
 - 2026-05-01 — B3-impl step 3 — `MysqlRuntimeRepository.get_feed` 接入 alpha 混合：每请求一次 `_load_default_seed_topic_weights` + 一次 `compute_alpha`；per-candidate `topic_match_score = α * personalized + (1-α) * default`，`final_score` 形状不变。`/healthz` 仍 `repository_backend: mysql`，`/feed?user_id=7248&page_size=3` 返回 3 条，topic_match_score 全非零。step 4-5 留下次会话。
+- 2026-05-01 — B3-impl step 4 — `FeedDebugPayload` 新增 `cold_start_mix`，`FeedItemScores` 新增 `personalized_topic_score/default_topic_score`；schema import 检查通过，`/feed?debug=true` 可直接解释混合权重。
+- 2026-05-01 — B3-impl step 5 — 真实 docker MySQL + uvicorn eval 跑通：`cold_start_mix.alpha=0.885443`、`behavior_score=365`、10 条 debug item 中 7 条有非零 `default_topic_score`；`eval_replay_metrics.py --limit 0` 得到 baseline 0.9000 / replay 1.0000 / **Gain@10 = 0.1000**；`docs/v1_metrics.md` 加第三行基线，`docs/v1_api_contract.md` 同步 feed 响应字段。

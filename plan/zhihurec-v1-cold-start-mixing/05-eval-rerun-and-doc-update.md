@@ -12,6 +12,7 @@ gap-checklist B3 step 3 verification is the live `/feed?debug=true` check. Once 
 - `docs/v1_metrics.md` — append a third row, update the Caveats section if behavior changes meaningfully.
 - `plan/project_brief_zh.md` §18 — bullet pointing to this plan.
 - `plan/zhihurec-v1-gap-checklist/README.md` — Verification log entry.
+- `docs/v1_api_contract.md` - update the `/feed` response example so the score fields and `cold_start_mix` debug block match the new schema.
 - No code changes in this step.
 
 ## 4. Exact changes
