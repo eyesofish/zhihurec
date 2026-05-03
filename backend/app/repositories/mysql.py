@@ -191,8 +191,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     topics=topics,
                     selected_reason=self._selected_reason(
                         is_fallback=is_fallback,
-                        topic_match_score=topic_match_score,
-                        query_recall_boost=query_recall_boost,
+                        sources=candidate["sources"],
                     ),
                     scores=FeedItemScores(
                         base_recall_score=base_score,
@@ -500,7 +499,10 @@ class MysqlRuntimeRepository(RuntimeRepository):
             )
             row = cursor.fetchone()
         if row is None:
-            return {}
+            raise RuntimeError(
+                f"system_profile_seed[{seed_key!r}] missing — "
+                "apply_demo_mysql.py must populate the cold-start seed before /feed"
+            )
         weights = self._parse_topic_weights(row.get("topic_weights_json"))
         return {item.topic_id: item.weight for item in weights}
 
@@ -1068,8 +1070,10 @@ class MysqlRuntimeRepository(RuntimeRepository):
         for part in (query_key or "").split():
             try:
                 tokens.append(int(part))
-            except ValueError:
-                return []
+            except ValueError as exc:
+                raise ValueError(
+                    f"query_key must be space-separated integers; got token {part!r} in {query_key!r}"
+                ) from exc
         return tokens
 
     @staticmethod
@@ -1086,13 +1090,12 @@ class MysqlRuntimeRepository(RuntimeRepository):
     @staticmethod
     def _selected_reason(
         is_fallback: bool,
-        topic_match_score: float,
-        query_recall_boost: float,
+        sources: set[str],
     ) -> str:
         if is_fallback:
             return "Filled by hot_or_fresh because primary recall was short."
-        if query_recall_boost > 0 and query_recall_boost >= topic_match_score:
+        if "recent_query_topic" in sources:
             return "Selected because recent query topics boosted this answer."
-        if topic_match_score > 0:
+        if "profile_topic" in sources:
             return "Selected because its topics match the user profile."
         return "Selected by base recall score."
