@@ -132,3 +132,4 @@ C. 全部 E1-E7 完成后，gap-checklist 末尾追加一行 cross-reference（E
 每完成一个 step 在这里追加：`YYYY-MM-DD - E<n> - <一句话结果>`
 
 - 2026-05-16 - E1 - 散文件移入 docs/；4 个 runtime 依赖硬钉 fastapi==0.115.0 / uvicorn==0.34.0 / pydantic==2.12.5 / pymysql==1.1.3；新增 requirements-dev.txt 含 pytest/pytest-asyncio/ruff/mypy/types-PyMySQL，SmokeTest 通过。
+- 2026-05-16 - E2 - .env.example 17 个变量齐；pyproject.toml 包含 ruff/mypy/pytest 工具配置；ruff check 可加载并报告现有 9 个 lint 问题，pytest collect-only 可加载配置。

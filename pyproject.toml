@@ -1,0 +1,67 @@
+# ZhihuRec V1 tooling configuration.
+# This file intentionally does NOT declare [project]: the repo is run as scripts,
+# not installed as a package. V2 may add [project] when shared eval code becomes a real package.
+
+# -------------------- Ruff --------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = [
+    "backend/app/**/__pycache__",
+    "build",
+    "data",
+    ".venv",
+]
+
+[tool.ruff.lint]
+# Explicit rule selection. Avoid `select = ["ALL"]`: preview rules are noisy.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501", # line-length is enforced by formatter, not lint
+    "B008", # FastAPI Depends() in defaults is intentional
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts are one-shot exploratory code; allow style drift.
+"scripts/*.py" = ["B", "SIM", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# -------------------- Mypy --------------------
+[tool.mypy]
+python_version = "3.13"
+files = ["backend/app"]
+plugins = ["pydantic.mypy"]
+# Middle-path strictness (see plan README Trade-off table E2).
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+exclude = [
+    "^scripts/",
+    "^tests/",
+    "^build/",
+]
+
+# -------------------- Pytest --------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "mysql: tests that require a running ZHIHUREC_DATABASE_URL backend (skip by default).",
+]

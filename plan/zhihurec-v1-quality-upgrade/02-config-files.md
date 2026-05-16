@@ -2,12 +2,12 @@
 
 ## 这一步做什么
 
-1. 新建仓库根 `.env.example`，把 13 个 `ZHIHUREC_*` 环境变量全列出来，附默认值和一句注释。
+1. 新建仓库根 `.env.example`，把 17 个 `ZHIHUREC_*` 环境变量全列出来，附默认值和一句注释。
 2. 新建仓库根 `pyproject.toml`，包含 ruff / mypy / pytest 的配置。**不**含 `[project]` 表（不把仓库声明为 Python package —— 见 README "与 upgrade_v2 的接口考虑"）。
 
 ## 为什么
 
-- `.gitignore` line 4 已经显式 whitelist `.env.example`，但文件不存在 —— 配置发现性的明显空洞。13 个 `ZHIHUREC_*` 包括 alpha gating / behavior delta 这种调优旋钮，列出来才让人知道能调。
+- `.gitignore` line 4 已经显式 whitelist `.env.example`，但文件不存在 —— 配置发现性的明显空洞。17 个 `ZHIHUREC_*` 包括 alpha gating / behavior delta 这种调优旋钮，列出来才让人知道能调。
 - `pyproject.toml` 是 ruff / mypy / pytest 的事实标准配置位置。放仓库根（不放 `backend/`）是因为 ruff 会扫 `scripts/` 也，跨目录配置只在仓库根才方便。
 
 详细 trade-off 见 README "Trade-off 速查表" E2 行。
@@ -128,6 +128,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "mysql: tests that require a running ZHIHUREC_DATABASE_URL backend (skip by default).",
 ]
@@ -160,7 +161,7 @@ Get-Content pyproject.toml | Select-String '^\[tool\.' | Measure-Object | Select
 
 ## 完工后
 
-- 在本 plan README "Verification log" 追加：`2026-XX-XX - E2 - .env.example 13 个变量齐；pyproject.toml 包含 ruff/mypy/pytest 三段配置；ruff check 可加载`。
+- 在本 plan README "Verification log" 追加：`2026-XX-XX - E2 - .env.example 17 个变量齐；pyproject.toml 包含 ruff/mypy/pytest 三段配置；ruff check 可加载`。
 - 单独 commit：`chore(quality): E2 add .env.example and pyproject.toml`。
 
 ## 失败排查
