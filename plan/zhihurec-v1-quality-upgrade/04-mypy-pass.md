@@ -103,6 +103,7 @@ Select-String -Path backend\app -Recurse -Pattern 'type:\s*ignore' | Measure-Obj
 
 - **`Cannot find implementation or library stub for module named "pymysql"`**：types-PyMySQL 没装，回到 E1 装上。
 - **`pydantic.mypy` 找不到**：你装的 pydantic 是 v1 老版本（v2 才内置 plugin）。`pip install -U "pydantic>=2"` 后 E1 重新钉版本，把 `requirements.txt` 里的 pydantic 版本也更新。
+- **`Source file found twice under different module names`**：`backend/` 没有顶层 `__init__.py`，mypy 可能同时看到 `app.*` 和 `backend.app.*`。保留 `[tool.mypy] explicit_package_bases = true`，不要改 import 形态。
 - **PyMySQL stub 仍不够好**：注解函数局部变量类型，例 `row: dict[str, Any] | None = cursor.fetchone()`，让 mypy narrow 一下。
 - **mypy 卡在某个 cyclic import**：检查 `backend/app/repositories/__init__.py` / `backend/app/services/__init__.py` 是否引入了 cyclic dependency。一般加 `from __future__ import annotations` + 字符串注解可解。
 - **修着修着失控了（issue 越来越多）**：可能引入了过度严格的局部注解。回滚到上一个 mypy-clean commit（如果还没 commit，`git stash`），逐个 file 修。

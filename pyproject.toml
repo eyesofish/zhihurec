@@ -45,6 +45,7 @@ indent-style = "space"
 python_version = "3.13"
 files = ["backend/app"]
 plugins = ["pydantic.mypy"]
+explicit_package_bases = true
 # Middle-path strictness (see plan README Trade-off table E2).
 disallow_untyped_defs = true
 warn_return_any = true

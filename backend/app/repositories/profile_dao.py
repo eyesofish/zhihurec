@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from backend.app.repositories._utils import (
     parse_recent_clicks,
@@ -31,7 +31,7 @@ def fetch_profile_row(connection: Any, user_id: int) -> dict[str, Any]:
             """,
             (user_id,),
         )
-        row = cursor.fetchone()
+        row = cast(dict[str, Any] | None, cursor.fetchone())
     if row is None:
         raise LookupError(f"user_profile row not found for user_id={user_id}")
     return row
