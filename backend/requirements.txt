@@ -1,4 +1,6 @@
-fastapi
-uvicorn
-pydantic
-pymysql
+# V1 runtime dependencies pinned to versions verified by scripts/init_local.ps1 -SmokeTest.
+# Bump deliberately; rerun the smoke test after each upgrade.
+fastapi==0.115.0
+uvicorn==0.34.0
+pydantic==2.12.5
+pymysql==1.1.3
