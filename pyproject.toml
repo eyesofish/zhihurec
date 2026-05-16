@@ -33,6 +33,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Scripts are one-shot exploratory code; allow style drift.
 "scripts/*.py" = ["B", "SIM", "UP"]
+# eda.py intentionally writes Chinese report text with full-width punctuation.
+"scripts/eda.py" = ["RUF001"]
 
 [tool.ruff.format]
 quote-style = "double"

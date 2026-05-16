@@ -15,4 +15,3 @@ def search(
     service: SearchService = Depends(get_search_service),
 ) -> SearchResponse:
     return service.search(payload)
-

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import lru_cache
-import os
 
 
 @dataclass(frozen=True)
@@ -46,16 +46,30 @@ def get_settings() -> Settings:
         database_url=os.getenv("ZHIHUREC_DATABASE_URL", ""),
         request_id_prefix=os.getenv("ZHIHUREC_REQUEST_ID_PREFIX", "zhihurec"),
         search_query_behavior_delta=float(os.getenv("ZHIHUREC_SEARCH_QUERY_BEHAVIOR_DELTA", "1.0")),
-        recommendation_click_behavior_delta=float(os.getenv("ZHIHUREC_RECOMMENDATION_CLICK_BEHAVIOR_DELTA", "3.0")),
-        search_result_click_behavior_delta=float(os.getenv("ZHIHUREC_SEARCH_RESULT_CLICK_BEHAVIOR_DELTA", "5.0")),
+        recommendation_click_behavior_delta=float(
+            os.getenv("ZHIHUREC_RECOMMENDATION_CLICK_BEHAVIOR_DELTA", "3.0")
+        ),
+        search_result_click_behavior_delta=float(
+            os.getenv("ZHIHUREC_SEARCH_RESULT_CLICK_BEHAVIOR_DELTA", "5.0")
+        ),
         profile_topic_decay=float(os.getenv("ZHIHUREC_PROFILE_TOPIC_DECAY", "0.92")),
-        recommendation_click_topic_delta=float(os.getenv("ZHIHUREC_RECOMMENDATION_CLICK_TOPIC_DELTA", "0.08")),
-        search_result_click_topic_delta=float(os.getenv("ZHIHUREC_SEARCH_RESULT_CLICK_TOPIC_DELTA", "0.12")),
-        search_result_overlap_topic_delta=float(os.getenv("ZHIHUREC_SEARCH_RESULT_OVERLAP_TOPIC_DELTA", "0.2")),
+        recommendation_click_topic_delta=float(
+            os.getenv("ZHIHUREC_RECOMMENDATION_CLICK_TOPIC_DELTA", "0.08")
+        ),
+        search_result_click_topic_delta=float(
+            os.getenv("ZHIHUREC_SEARCH_RESULT_CLICK_TOPIC_DELTA", "0.12")
+        ),
+        search_result_overlap_topic_delta=float(
+            os.getenv("ZHIHUREC_SEARCH_RESULT_OVERLAP_TOPIC_DELTA", "0.2")
+        ),
         cold_start_alpha_floor=float(os.getenv("ZHIHUREC_COLD_START_ALPHA_FLOOR", "0.1")),
         cold_start_alpha_ceiling=float(os.getenv("ZHIHUREC_COLD_START_ALPHA_CEILING", "0.95")),
-        cold_start_behavior_score_scale=float(os.getenv("ZHIHUREC_COLD_START_BEHAVIOR_SCORE_SCALE", "30.0")),
-        cold_start_default_seed_key=os.getenv("ZHIHUREC_COLD_START_DEFAULT_SEED_KEY", "cold_start_default"),
+        cold_start_behavior_score_scale=float(
+            os.getenv("ZHIHUREC_COLD_START_BEHAVIOR_SCORE_SCALE", "30.0")
+        ),
+        cold_start_default_seed_key=os.getenv(
+            "ZHIHUREC_COLD_START_DEFAULT_SEED_KEY", "cold_start_default"
+        ),
         cors_origins=tuple(
             origin.strip()
             for origin in os.getenv(

@@ -10,4 +10,3 @@ class ProfileService:
 
     def get_debug_profile(self, user_id: int) -> DebugProfileResponse:
         return self._repository.get_debug_profile(user_id)
-

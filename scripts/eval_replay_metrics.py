@@ -19,6 +19,7 @@ Definition (brief §17 key secondary metric):
       event stream up to and including E_s has been replayed.
   Gain = replay - baseline. Positive Gain is the hard signal that search reshapes recs.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,7 +29,6 @@ from collections import defaultdict
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPLAY = ROOT / "build" / "demo_world" / "demo_event_replay.jsonl"

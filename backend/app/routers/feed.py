@@ -17,4 +17,3 @@ def get_feed(
     service: FeedService = Depends(get_feed_service),
 ) -> FeedResponse:
     return service.get_feed(user_id=user_id, page_size=page_size, debug=debug)
-

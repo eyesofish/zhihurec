@@ -46,7 +46,6 @@ from backend.app.schemas.event import (
     SearchResultClickDebug,
     SearchResultClickRequest,
 )
-from backend.app.schemas.profile import DebugProfileResponse
 from backend.app.schemas.feed import (
     ColdStartMix,
     FeedDebugPayload,
@@ -56,6 +55,7 @@ from backend.app.schemas.feed import (
     FeedResponse,
     RecallCandidateDebug,
 )
+from backend.app.schemas.profile import DebugProfileResponse
 from backend.app.schemas.search import (
     SearchDebugPayload,
     SearchItem,
@@ -84,7 +84,9 @@ class MysqlRuntimeRepository(RuntimeRepository):
             profile = profile_from_row(profile_row)
             topic_weight_map = {item.topic_id: item.weight for item in profile.topic_weights}
             query_topic_scores = load_recent_query_topic_scores(connection, profile.recent_queries)
-            default_seed_key = profile.cold_start_seed_key or self._settings.cold_start_default_seed_key
+            default_seed_key = (
+                profile.cold_start_seed_key or self._settings.cold_start_default_seed_key
+            )
             default_topic_weight_map = load_default_seed_topic_weights(
                 connection,
                 seed_key=default_seed_key,
@@ -136,7 +138,10 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
                 topics = topics_by_answer.get(answer_id, [])
                 topic_ids = {topic.topic_id for topic in topics}
-                base_score = round(float(row.get("hot_score") or candidate["raw_base_score"] or 0) / max_hot_score, 6)
+                base_score = round(
+                    float(row.get("hot_score") or candidate["raw_base_score"] or 0) / max_hot_score,
+                    6,
+                )
                 personalized_topic_score = round(
                     sum(topic_weight_map.get(topic_id, 0.0) for topic_id in topic_ids), 6
                 )
@@ -147,7 +152,9 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     alpha * personalized_topic_score + (1.0 - alpha) * default_topic_score,
                     6,
                 )
-                query_recall_boost = round(sum(query_topic_scores.get(topic_id, 0.0) for topic_id in topic_ids), 6)
+                query_recall_boost = round(
+                    sum(query_topic_scores.get(topic_id, 0.0) for topic_id in topic_ids), 6
+                )
                 final_score = round(base_score + topic_match_score + query_recall_boost, 6)
                 sources = sorted(candidate["sources"])
                 is_fallback = bool(candidate["is_fallback"])
@@ -155,11 +162,14 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 item = FeedItem(
                     answer_id=answer_id,
                     question_id=int(row.get("question_id") or 0),
-                    question_title=row.get("question_title") or f"Question {row.get('question_id') or 0}",
-                    answer_summary=row.get("answer_summary") or f"Synthetic answer summary for answer {answer_id}.",
+                    question_title=row.get("question_title")
+                    or f"Question {row.get('question_id') or 0}",
+                    answer_summary=row.get("answer_summary")
+                    or f"Synthetic answer summary for answer {answer_id}.",
                     author=AuthorCard(
                         author_id=int(row.get("author_id") or 0),
-                        display_name=row.get("author_name") or f"Author {row.get('author_id') or 0}",
+                        display_name=row.get("author_name")
+                        or f"Author {row.get('author_id') or 0}",
                     ),
                     topics=topics,
                     selected_reason=selected_reason(
@@ -263,8 +273,10 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 item = SearchItem(
                     answer_id=answer_id,
                     question_id=int(row.get("question_id") or 0),
-                    question_title=row.get("question_title") or f"Question {row.get('question_id') or 0}",
-                    answer_summary=row.get("answer_summary") or f"Synthetic answer summary for answer {answer_id}.",
+                    question_title=row.get("question_title")
+                    or f"Question {row.get('question_id') or 0}",
+                    answer_summary=row.get("answer_summary")
+                    or f"Synthetic answer summary for answer {answer_id}.",
                     topics=topics_by_answer.get(answer_id, []),
                     scores=SearchItemScores(
                         topic_match_score=topic_match_score,
@@ -280,7 +292,9 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     )
                 )
 
-            scored_items.sort(key=lambda pair: (pair[0], -pair[1].scores.final_score, pair[1].answer_id))
+            scored_items.sort(
+                key=lambda pair: (pair[0], -pair[1].scores.final_score, pair[1].answer_id)
+            )
             selected = scored_items[: payload.page_size]
             response = SearchResponse(
                 user_id=payload.user_id,
@@ -452,7 +466,9 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 raw_base_score=float(row.get("hot_score") or 0.0),
             )
 
-        non_fallback_count = sum(1 for candidate in candidates.values() if not candidate["is_fallback"])
+        non_fallback_count = sum(
+            1 for candidate in candidates.values() if not candidate["is_fallback"]
+        )
         if non_fallback_count < page_size:
             for row in load_hot_fallback_rows(connection, max(page_size * 5, 20)):
                 if len(candidates) >= page_size:

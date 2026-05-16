@@ -10,4 +10,3 @@ class SearchService:
 
     def search(self, payload: SearchRequest) -> SearchResponse:
         return self._repository.search(payload)
-

@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, List, Sequence, Tuple
 
-
 REQUIRED_INPUTS = [
     "manifest.json",
     "topic.jsonl",
@@ -61,7 +60,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-sql",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "build" / "demo_world" / "import_demo_world.sql",
+        default=Path(__file__).resolve().parents[1]
+        / "build"
+        / "demo_world"
+        / "import_demo_world.sql",
         help="Output SQL file to write.",
     )
     parser.add_argument(
@@ -86,7 +88,9 @@ def parse_args() -> argparse.Namespace:
 def ensure_inputs(input_dir: Path) -> None:
     missing = [name for name in REQUIRED_INPUTS if not (input_dir / name).exists()]
     if missing:
-        raise FileNotFoundError(f"Missing required demo-world files under {input_dir}: {', '.join(missing)}")
+        raise FileNotFoundError(
+            f"Missing required demo-world files under {input_dir}: {', '.join(missing)}"
+        )
 
 
 def load_json(path: Path) -> object:
@@ -122,7 +126,9 @@ def sql_literal(value: object | None) -> str:
     return sql_quote(str(value))
 
 
-def chunked(rows: Sequence[Tuple[object, ...]], batch_size: int) -> Iterator[Sequence[Tuple[object, ...]]]:
+def chunked(
+    rows: Sequence[Tuple[object, ...]], batch_size: int
+) -> Iterator[Sequence[Tuple[object, ...]]]:
     for start in range(0, len(rows), batch_size):
         yield rows[start : start + batch_size]
 
@@ -391,7 +397,9 @@ def build_user_event_rows(input_dir: Path) -> List[Tuple[object, ...]]:
     return rows
 
 
-def build_table_payloads(input_dir: Path) -> List[Tuple[str, Sequence[str], List[Tuple[object, ...]]]]:
+def build_table_payloads(
+    input_dir: Path,
+) -> List[Tuple[str, Sequence[str], List[Tuple[object, ...]]]]:
     return [
         (
             "topic",
@@ -400,7 +408,14 @@ def build_table_payloads(input_dir: Path) -> List[Tuple[str, Sequence[str], List
         ),
         (
             "author",
-            ["author_id", "display_name", "is_excellent_author", "follower_count", "is_excellent_answerer", "source"],
+            [
+                "author_id",
+                "display_name",
+                "is_excellent_author",
+                "follower_count",
+                "is_excellent_answerer",
+                "source",
+            ],
             build_author_rows(input_dir),
         ),
         (
@@ -605,7 +620,9 @@ def main() -> None:
         truncate_first=args.truncate_first,
     )
     total_rows = sum(len(rows) for _, _, rows in table_payloads)
-    print(f"Wrote {args.output_sql} with {total_rows} row(s) across {len(table_payloads)} table payload(s).")
+    print(
+        f"Wrote {args.output_sql} with {total_rows} row(s) across {len(table_payloads)} table payload(s)."
+    )
 
 
 if __name__ == "__main__":

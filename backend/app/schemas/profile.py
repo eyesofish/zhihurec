@@ -31,4 +31,3 @@ class DebugProfileResponse(ApiModel):
     recent_clicked_answers: list[ProfileRecentClick]
     recent_queries: list[ProfileRecentQuery]
     vector_summary: VectorSummary
-

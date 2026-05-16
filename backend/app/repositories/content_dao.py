@@ -26,7 +26,7 @@ def load_answer_ids_for_topics(
             ORDER BY a.hot_score DESC, at.answer_id ASC
             LIMIT %s
             """,
-            tuple(topic_ids) + (limit,),
+            (*tuple(topic_ids), limit),
         )
         return list(cursor.fetchall())
 

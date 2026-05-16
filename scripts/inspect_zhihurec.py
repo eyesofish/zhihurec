@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
-
 TABLE_ORDER = [
     "inter_impression.csv",
     "inter_query.csv",
@@ -339,7 +338,9 @@ def ensure_files_exist(data_dir: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Inspect ZhihuRec-1M tables and key relationships.")
+    parser = argparse.ArgumentParser(
+        description="Inspect ZhihuRec-1M tables and key relationships."
+    )
     parser.add_argument(
         "--data-dir",
         type=Path,

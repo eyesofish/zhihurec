@@ -15,4 +15,3 @@ def debug_profile(
     service: ProfileService = Depends(get_profile_service),
 ) -> DebugProfileResponse:
     return service.get_debug_profile(user_id=user_id)
-

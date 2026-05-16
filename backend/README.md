@@ -70,3 +70,20 @@ Suggested route check:
 Follow `plan/zhihurec-v1-runtime-closed-loop/` next.
 
 The next backend task is to add `MysqlRuntimeRepository` and make it the active runtime repository when `ZHIHUREC_DATABASE_URL` is configured. Until then, `UnwiredRuntimeRepository` intentionally returns controlled `repository_not_ready` responses for business endpoints.
+
+## Code quality
+
+Run before committing:
+
+```powershell
+# Format
+python -m ruff format backend\ scripts\ tests\
+# Lint
+python -m ruff check backend\ scripts\ tests\
+# Type check (backend/app only; see pyproject.toml [tool.mypy])
+python -m mypy
+# Tests (default; see plan/zhihurec-v1-quality-upgrade/05 for coverage)
+python -m pytest -v
+```
+
+Rules and ignore policy live in `pyproject.toml`. Per-line `# noqa: <CODE>` must include a reason after a second `#`.

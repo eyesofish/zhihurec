@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from backend.app.repositories.base import RuntimeRepository
-from backend.app.schemas.event import EventAckResponse, RecommendationClickRequest, SearchResultClickRequest
+from backend.app.schemas.event import (
+    EventAckResponse,
+    RecommendationClickRequest,
+    SearchResultClickRequest,
+)
 
 
 class EventService:
@@ -13,4 +17,3 @@ class EventService:
 
     def record_search_result_click(self, payload: SearchResultClickRequest) -> EventAckResponse:
         return self._repository.record_search_result_click(payload)
-

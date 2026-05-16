@@ -59,4 +59,3 @@ class EventAckResponse(ApiModel):
     ok: bool
     event_type: str
     debug: RecommendationClickDebug | SearchResultClickDebug | None = None
-

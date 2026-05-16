@@ -25,7 +25,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-
 ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / "data" / "zhihurec_1m" / "raw"
 BUILD_DEMO_DIR = ROOT / "build" / "demo_world"
@@ -74,8 +73,12 @@ def parse_args() -> argparse.Namespace:
         choices=["overview", "topic", "query", "demo", "all"],
         help="Report slice to generate. 'all' runs every implemented slice.",
     )
-    parser.add_argument("--raw-dir", type=Path, default=RAW_DIR, help="Directory with raw ZhihuRec CSV files.")
-    parser.add_argument("--fig-dir", type=Path, default=FIG_DIR, help="Directory where figures are written.")
+    parser.add_argument(
+        "--raw-dir", type=Path, default=RAW_DIR, help="Directory with raw ZhihuRec CSV files."
+    )
+    parser.add_argument(
+        "--fig-dir", type=Path, default=FIG_DIR, help="Directory where figures are written."
+    )
     parser.add_argument("--report", type=Path, default=REPORT_PATH, help="Markdown report path.")
     return parser.parse_args()
 
@@ -101,7 +104,12 @@ def read_overview_data(raw_dir: Path) -> OverviewData:
         raw_dir / "inter_impression.csv",
         header=None,
         names=["user_id", "answer_id", "impression_ts", "click_ts"],
-        dtype={"user_id": "int64", "answer_id": "int64", "impression_ts": "int64", "click_ts": "int64"},
+        dtype={
+            "user_id": "int64",
+            "answer_id": "int64",
+            "impression_ts": "int64",
+            "click_ts": "int64",
+        },
     )
     queries = pd.read_csv(
         raw_dir / "inter_query.csv",
@@ -151,7 +159,9 @@ def quantiles(series: pd.Series, qs: Iterable[float]) -> dict[str, float]:
     return {str(q): float(series.quantile(q)) for q in qs}
 
 
-def replace_markdown_section(text: str, start_heading: str, end_heading: str, replacement: str) -> str:
+def replace_markdown_section(
+    text: str, start_heading: str, end_heading: str, replacement: str
+) -> str:
     start = text.index(start_heading)
     end = text.index(end_heading, start)
     return text[:start] + replacement.rstrip() + "\n\n" + text[end:]
@@ -201,14 +211,21 @@ def save_event_timeline(impressions: pd.DataFrame, queries: pd.DataFrame, fig_di
     plt.close(fig)
 
 
-def save_user_activity_distribution(impressions: pd.DataFrame, queries: pd.DataFrame, users: pd.DataFrame, fig_dir: Path) -> pd.DataFrame:
+def save_user_activity_distribution(
+    impressions: pd.DataFrame, queries: pd.DataFrame, users: pd.DataFrame, fig_dir: Path
+) -> pd.DataFrame:
     impression_counts = impressions.groupby("user_id").size().rename("impressions")
-    click_counts = impressions.loc[impressions["click_ts"] > 0].groupby("user_id").size().rename("clicks")
-    query_counts = queries.groupby("user_id").size().rename("queries")
-    user_activity = users[["user_id"]].set_index("user_id").join([impression_counts, click_counts, query_counts]).fillna(0)
-    user_activity["total_observed_events"] = (
-        user_activity["impressions"] + user_activity["queries"]
+    click_counts = (
+        impressions.loc[impressions["click_ts"] > 0].groupby("user_id").size().rename("clicks")
     )
+    query_counts = queries.groupby("user_id").size().rename("queries")
+    user_activity = (
+        users[["user_id"]]
+        .set_index("user_id")
+        .join([impression_counts, click_counts, query_counts])
+        .fillna(0)
+    )
+    user_activity["total_observed_events"] = user_activity["impressions"] + user_activity["queries"]
 
     ranked = user_activity["total_observed_events"].sort_values(ascending=False)
     ranked = ranked[ranked > 0].reset_index(drop=True)
@@ -226,10 +243,19 @@ def save_user_activity_distribution(impressions: pd.DataFrame, queries: pd.DataF
     return user_activity
 
 
-def save_answer_interaction_distribution(impressions: pd.DataFrame, answers: pd.DataFrame, fig_dir: Path) -> pd.DataFrame:
+def save_answer_interaction_distribution(
+    impressions: pd.DataFrame, answers: pd.DataFrame, fig_dir: Path
+) -> pd.DataFrame:
     impression_counts = impressions.groupby("answer_id").size().rename("impressions")
-    click_counts = impressions.loc[impressions["click_ts"] > 0].groupby("answer_id").size().rename("clicks")
-    answer_activity = answers[["answer_id"]].set_index("answer_id").join([impression_counts, click_counts]).fillna(0)
+    click_counts = (
+        impressions.loc[impressions["click_ts"] > 0].groupby("answer_id").size().rename("clicks")
+    )
+    answer_activity = (
+        answers[["answer_id"]]
+        .set_index("answer_id")
+        .join([impression_counts, click_counts])
+        .fillna(0)
+    )
 
     ranked_impressions = answer_activity["impressions"].sort_values(ascending=False)
     ranked_impressions = ranked_impressions[ranked_impressions > 0].reset_index(drop=True)
@@ -237,7 +263,12 @@ def save_answer_interaction_distribution(impressions: pd.DataFrame, answers: pd.
     ranked_clicks = ranked_clicks[ranked_clicks > 0].reset_index(drop=True)
 
     fig, ax = plt.subplots(figsize=(10, 5.8))
-    ax.loglog(range(1, len(ranked_impressions) + 1), ranked_impressions, label="impressions", color="#3B6FB6")
+    ax.loglog(
+        range(1, len(ranked_impressions) + 1),
+        ranked_impressions,
+        label="impressions",
+        color="#3B6FB6",
+    )
     ax.loglog(range(1, len(ranked_clicks) + 1), ranked_clicks, label="clicks", color="#A45A52")
     ax.set_title("Answer Interaction Long Tail")
     ax.set_xlabel("Answer rank")
@@ -250,13 +281,21 @@ def save_answer_interaction_distribution(impressions: pd.DataFrame, answers: pd.
     return answer_activity
 
 
-def build_overview_summary(data: OverviewData, user_activity: pd.DataFrame, answer_activity: pd.DataFrame) -> dict[str, object]:
+def build_overview_summary(
+    data: OverviewData, user_activity: pd.DataFrame, answer_activity: pd.DataFrame
+) -> dict[str, object]:
     impressions = data.impressions
     queries = data.queries
     click_mask = impressions["click_ts"] > 0
 
     interaction_min = int(min(impressions["impression_ts"].min(), queries["query_ts"].min()))
-    interaction_max = int(max(impressions["impression_ts"].max(), queries["query_ts"].max(), impressions.loc[click_mask, "click_ts"].max()))
+    interaction_max = int(
+        max(
+            impressions["impression_ts"].max(),
+            queries["query_ts"].max(),
+            impressions.loc[click_mask, "click_ts"].max(),
+        )
+    )
     answer_create_ts = data.answers.loc[data.answers["create_ts"] > 0, "create_ts"]
     question_create_ts = data.questions.loc[data.questions["create_ts"] > 0, "create_ts"]
     content_min = int(min(answer_create_ts.min(), question_create_ts.min()))
@@ -277,7 +316,10 @@ def build_overview_summary(data: OverviewData, user_activity: pd.DataFrame, answ
 
     top_1pct_user_events = int(max(1, round(len(user_activity) * 0.01)))
     top_user_share = float(
-        user_activity["total_observed_events"].sort_values(ascending=False).head(top_1pct_user_events).sum()
+        user_activity["total_observed_events"]
+        .sort_values(ascending=False)
+        .head(top_1pct_user_events)
+        .sum()
         / user_activity["total_observed_events"].sum()
     )
     top_query_share = float(
@@ -305,8 +347,8 @@ def build_overview_summary(data: OverviewData, user_activity: pd.DataFrame, answ
             "end_date_utc": ts_to_date_text(content_max),
         },
         "activity": {
-            "impression_rows": int(len(impressions)),
-            "query_rows": int(len(queries)),
+            "impression_rows": len(impressions),
+            "query_rows": len(queries),
             "click_rows": click_count,
             "ctr": ctr,
             "active_users": active_users,
@@ -327,9 +369,13 @@ def build_overview_summary(data: OverviewData, user_activity: pd.DataFrame, answ
             "top_1pct_user_event_share": top_user_share,
             "top_1pct_user_query_share": top_query_share,
             "top_1pct_answer_impression_share": top_answer_impression_share,
-            "user_total_event_quantiles": quantiles(user_activity["total_observed_events"], [0.5, 0.9, 0.99]),
+            "user_total_event_quantiles": quantiles(
+                user_activity["total_observed_events"], [0.5, 0.9, 0.99]
+            ),
             "user_query_quantiles": quantiles(user_activity["queries"], [0.5, 0.9, 0.99]),
-            "answer_impression_quantiles": quantiles(answer_activity["impressions"], [0.5, 0.9, 0.99]),
+            "answer_impression_quantiles": quantiles(
+                answer_activity["impressions"], [0.5, 0.9, 0.99]
+            ),
         },
     }
     return summary
@@ -344,7 +390,9 @@ def load_summary(fig_dir: Path) -> dict[str, object]:
 
 def save_summary(summary: dict[str, object], fig_dir: Path) -> None:
     fig_dir.mkdir(parents=True, exist_ok=True)
-    (fig_dir / "eda_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    (fig_dir / "eda_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def read_topic_rows(raw_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, int]:
@@ -352,7 +400,9 @@ def read_topic_rows(raw_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.Serie
     answer_topics = answer_topics.rename(columns={0: "answer_id", 17: "topic_ids"})
     question_topics = pd.read_csv(raw_dir / "info_question.csv", header=None, usecols=[0, 7])
     question_topics = question_topics.rename(columns={0: "question_id", 7: "topic_ids"})
-    impression_answer_ids = pd.read_csv(raw_dir / "inter_impression.csv", header=None, usecols=[1], names=["answer_id"])
+    impression_answer_ids = pd.read_csv(
+        raw_dir / "inter_impression.csv", header=None, usecols=[1], names=["answer_id"]
+    )
     answer_impressions = impression_answer_ids.groupby("answer_id").size()
     total_topics = count_csv_rows(raw_dir / "info_topic.csv")
     return answer_topics, question_topics, answer_impressions, total_topics
@@ -405,12 +455,17 @@ def compute_topic_summary(
         "answer_topic_links": int(sum(answer_link_by_topic.values())),
         "question_topic_links": int(sum(question_link_by_topic.values())),
         "total_weighted_topic_exposure": int(total_weighted_exposure),
-        "top_100_topic_exposure_share": top_100_exposure / total_weighted_exposure if total_weighted_exposure else 0.0,
+        "top_100_topic_exposure_share": top_100_exposure / total_weighted_exposure
+        if total_weighted_exposure
+        else 0.0,
         "top_topic": {
             "topic_id": int(top_20[0][0]) if top_20 else None,
             "weighted_exposure": int(top_20[0][1]) if top_20 else 0,
         },
-        "top_20_topics": [{"topic_id": int(topic_id), "weighted_exposure": int(value)} for topic_id, value in top_20],
+        "top_20_topics": [
+            {"topic_id": int(topic_id), "weighted_exposure": int(value)}
+            for topic_id, value in top_20
+        ],
         "cooccurrence_edges_kept": int(min(len(cooccurrence), 120)),
     }
     return topic_summary, exposure_by_topic, cooccurrence
@@ -481,7 +536,9 @@ def save_topic_cooccurrence(
     xs = [positions[topic_id][0] for topic_id in top_topics]
     ys = [positions[topic_id][1] for topic_id in top_topics]
     sizes = [70 + 620 * (exposure_by_topic[topic_id] / max_exposure) for topic_id in top_topics]
-    ax.scatter(xs, ys, s=sizes, color="#3B6FB6", alpha=0.9, edgecolor="white", linewidth=0.8, zorder=3)
+    ax.scatter(
+        xs, ys, s=sizes, color="#3B6FB6", alpha=0.9, edgecolor="white", linewidth=0.8, zorder=3
+    )
     for topic_id in top_topics[:20]:
         x, y = positions[topic_id]
         ax.text(x * 1.08, y * 1.08, str(topic_id), ha="center", va="center", fontsize=8)
@@ -512,7 +569,9 @@ def write_topic_report_section(report_path: Path, topic_summary: dict[str, objec
 
 结论：topic 空间既有明显集中度，也有共现结构。它不提供自然语言语义标签，但足够支撑 V1 的轻量召回、搜索意图映射和 cold-start profile blending。
 """
-    updated = replace_markdown_section(existing, "## 3. Topic 空间观察", "## 4. Query 行为观察", section)
+    updated = replace_markdown_section(
+        existing, "## 3. Topic 空间观察", "## 4. Query 行为观察", section
+    )
     report_path.write_text(updated, encoding="utf-8")
 
 
@@ -561,7 +620,9 @@ def load_replay_event_counts(replay_path: Path) -> Counter[str]:
     return counts
 
 
-def compute_query_session_stats(queries: pd.DataFrame, impressions: pd.DataFrame) -> dict[str, object]:
+def compute_query_session_stats(
+    queries: pd.DataFrame, impressions: pd.DataFrame
+) -> dict[str, object]:
     imps_by_user: dict[int, list[int]] = {}
     clicks_by_user: dict[int, list[int]] = {}
 
@@ -607,8 +668,12 @@ def compute_query_session_stats(queries: pd.DataFrame, impressions: pd.DataFrame
         "feed_before_search_60m_share": prev_60m / query_count if query_count else 0.0,
         "post_search_click_4h_count": int(click_4h),
         "post_search_click_4h_share": click_4h / query_count if query_count else 0.0,
-        "median_seconds_since_prev_impression": float(pd.Series(deltas_to_prev_impression).median()) if deltas_to_prev_impression else None,
-        "median_seconds_to_next_click": float(pd.Series(deltas_to_next_click).median()) if deltas_to_next_click else None,
+        "median_seconds_since_prev_impression": float(pd.Series(deltas_to_prev_impression).median())
+        if deltas_to_prev_impression
+        else None,
+        "median_seconds_to_next_click": float(pd.Series(deltas_to_next_click).median())
+        if deltas_to_next_click
+        else None,
     }
 
 
@@ -648,7 +713,9 @@ def save_feed_to_search_transition(session_stats: dict[str, object], fig_dir: Pa
     ax.set_ylabel("Share of query events")
     ax.set_ylim(0, 1)
     for bar, value in zip(bars, values):
-        ax.text(bar.get_x() + bar.get_width() / 2, value + 0.015, f"{value * 100:.1f}%", ha="center")
+        ax.text(
+            bar.get_x() + bar.get_width() / 2, value + 0.015, f"{value * 100:.1f}%", ha="center"
+        )
     fig.tight_layout()
     fig.savefig(fig_dir / "10_feed_to_search_transition.png", dpi=160)
     plt.close(fig)
@@ -664,7 +731,9 @@ def save_post_search_click_rate(session_stats: dict[str, object], fig_dir: Path)
     ax.set_ylabel("Share of query events")
     ax.set_ylim(0, 1)
     for bar, value in zip(bars, values):
-        ax.text(bar.get_x() + bar.get_width() / 2, value + 0.015, f"{value * 100:.1f}%", ha="center")
+        ax.text(
+            bar.get_x() + bar.get_width() / 2, value + 0.015, f"{value * 100:.1f}%", ha="center"
+        )
     fig.tight_layout()
     fig.savefig(fig_dir / "11_post_search_click_rate.png", dpi=160)
     plt.close(fig)
@@ -693,7 +762,9 @@ search 后点击只能用 timestamp window 做启发式估计，不能当成真�
 
 结论：raw 数据支持“feed→search”不是纯想象；demo bridge 又能把 query 映射到 topic，并把 search query / search click 写入 replay。它们共同支撑 V1 的核心链路：search 作为高意图信号，反哺后续 feed 推荐。
 """
-    updated = replace_markdown_section(existing, "## 4. Query 行为观察", "## 5. Demo World 子集说明", section)
+    updated = replace_markdown_section(
+        existing, "## 4. Query 行为观察", "## 5. Demo World 子集说明", section
+    )
     report_path.write_text(updated, encoding="utf-8")
 
 
@@ -703,7 +774,12 @@ def run_query(raw_dir: Path, fig_dir: Path, report_path: Path) -> dict[str, obje
         raw_dir / "inter_impression.csv",
         header=None,
         names=["user_id", "answer_id", "impression_ts", "click_ts"],
-        dtype={"user_id": "int64", "answer_id": "int64", "impression_ts": "int64", "click_ts": "int64"},
+        dtype={
+            "user_id": "int64",
+            "answer_id": "int64",
+            "impression_ts": "int64",
+            "click_ts": "int64",
+        },
     )
     queries = pd.read_csv(
         raw_dir / "inter_query.csv",
@@ -723,12 +799,14 @@ def run_query(raw_dir: Path, fig_dir: Path, report_path: Path) -> dict[str, obje
 
     topic_count_series = pd.Series(topic_counts, dtype="int64")
     query_summary: dict[str, object] = {
-        "query_count": int(len(queries)),
+        "query_count": len(queries),
         "query_users": int(queries["user_id"].nunique()),
         "raw_unique_query_keys": int(queries["query_key"].nunique()),
         "query_length_quantiles": quantiles(query_lengths, [0.5, 0.9, 0.99]),
-        "query_topic_key_count": int(len(topic_counts)),
-        "query_topic_nonempty_share": float((topic_count_series > 0).mean()) if len(topic_count_series) else 0.0,
+        "query_topic_key_count": len(topic_counts),
+        "query_topic_nonempty_share": float((topic_count_series > 0).mean())
+        if len(topic_count_series)
+        else 0.0,
         "query_topic_count_quantiles": quantiles(topic_count_series, [0.5, 0.9, 0.99]),
         "replay_event_counts": dict(replay_counts),
     }
@@ -754,8 +832,16 @@ def save_demo_world_scale_comparison(demo_summary: dict[str, object], fig_dir: P
     x = range(len(labels))
     fig, ax = plt.subplots(figsize=(10, 5.8))
     width = 0.38
-    ax.bar([idx - width / 2 for idx in x], full_values, width=width, label="full raw", color="#3B6FB6")
-    ax.bar([idx + width / 2 for idx in x], demo_values, width=width, label="demo world", color="#A45A52")
+    ax.bar(
+        [idx - width / 2 for idx in x], full_values, width=width, label="full raw", color="#3B6FB6"
+    )
+    ax.bar(
+        [idx + width / 2 for idx in x],
+        demo_values,
+        width=width,
+        label="demo world",
+        color="#A45A52",
+    )
     ax.set_yscale("log")
     ax.set_title("Full Dataset vs Demo World Scale")
     ax.set_xlabel("Entity")
@@ -776,18 +862,39 @@ def build_demo_summary(summary: dict[str, object]) -> dict[str, object]:
     raw_unique_query_keys = int(query_summary.get("raw_unique_query_keys", 0))
     demo_query_keys = int(query_summary.get("query_topic_key_count", 0))
     scale_rows = [
-        {"label": "users", "full": int(row_counts["info_user"]), "demo": int(manifest["files_written"]["app_user.jsonl"])},
-        {"label": "answers", "full": int(row_counts["info_answer"]), "demo": int(manifest["selected_answer_count"])},
-        {"label": "questions", "full": int(row_counts["info_question"]), "demo": int(manifest["selected_question_count"])},
-        {"label": "authors", "full": int(row_counts["info_author"]), "demo": int(manifest["selected_author_count"])},
-        {"label": "topics", "full": int(row_counts["info_topic"]), "demo": int(manifest["selected_topic_count"])},
+        {
+            "label": "users",
+            "full": int(row_counts["info_user"]),
+            "demo": int(manifest["files_written"]["app_user.jsonl"]),
+        },
+        {
+            "label": "answers",
+            "full": int(row_counts["info_answer"]),
+            "demo": int(manifest["selected_answer_count"]),
+        },
+        {
+            "label": "questions",
+            "full": int(row_counts["info_question"]),
+            "demo": int(manifest["selected_question_count"]),
+        },
+        {
+            "label": "authors",
+            "full": int(row_counts["info_author"]),
+            "demo": int(manifest["selected_author_count"]),
+        },
+        {
+            "label": "topics",
+            "full": int(row_counts["info_topic"]),
+            "demo": int(manifest["selected_topic_count"]),
+        },
     ]
     if raw_unique_query_keys:
-        scale_rows.append({"label": "query keys", "full": raw_unique_query_keys, "demo": demo_query_keys})
+        scale_rows.append(
+            {"label": "query keys", "full": raw_unique_query_keys, "demo": demo_query_keys}
+        )
 
     ratios = {
-        row["label"]: (row["demo"] / row["full"] if row["full"] else 0.0)
-        for row in scale_rows
+        row["label"]: (row["demo"] / row["full"] if row["full"] else 0.0) for row in scale_rows
     }
     return {
         "demo_user_id": int(manifest["demo_user_id"]),
@@ -966,10 +1073,14 @@ def run_overview(raw_dir: Path, fig_dir: Path, report_path: Path) -> dict[str, o
 
     save_raw_table_rows(data.row_counts, fig_dir)
     save_event_timeline(data.impressions, data.queries, fig_dir)
-    user_activity = save_user_activity_distribution(data.impressions, data.queries, data.users, fig_dir)
+    user_activity = save_user_activity_distribution(
+        data.impressions, data.queries, data.users, fig_dir
+    )
     answer_activity = save_answer_interaction_distribution(data.impressions, data.answers, fig_dir)
     summary = build_overview_summary(data, user_activity, answer_activity)
-    (fig_dir / "eda_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    (fig_dir / "eda_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     write_overview_report(summary, report_path)
     return summary
 

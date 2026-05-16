@@ -21,7 +21,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import DefaultDict, Dict, Iterable, List, Sequence, Tuple
 
-
 REQUIRED_FILES = [
     "inter_impression.csv",
     "inter_query.csv",
@@ -44,7 +43,9 @@ def configure_csv_field_limit() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build compact demo-world assets from ZhihuRec 1M raw CSVs.")
+    parser = argparse.ArgumentParser(
+        description="Build compact demo-world assets from ZhihuRec 1M raw CSVs."
+    )
     parser.add_argument(
         "--data-dir",
         type=Path,
@@ -57,24 +58,78 @@ def parse_args() -> argparse.Namespace:
         default=Path(__file__).resolve().parents[1] / "build" / "demo_world",
         help="Directory where derived bridge artifacts will be written.",
     )
-    parser.add_argument("--demo-user-id", type=int, default=None, help="Force a specific demo user ID.")
-    parser.add_argument("--max-answers", type=int, default=2000, help="Maximum number of answers in the compact demo world.")
-    parser.add_argument("--max-hot-answers", type=int, default=200, help="Maximum number of answers in the hot fallback snapshot.")
-    parser.add_argument("--max-query-keys", type=int, default=5000, help="Maximum number of query keys kept in query_topic_map.")
-    parser.add_argument("--max-topics-per-query", type=int, default=5, help="Maximum topics stored for one query key.")
-    parser.add_argument("--max-user-topics", type=int, default=10, help="Maximum user topics used when estimating query-topic co-occurrence.")
-    parser.add_argument("--max-topic-weights", type=int, default=10, help="Maximum topics stored in one profile seed.")
-    parser.add_argument("--max-recent-clicks", type=int, default=10, help="Maximum recent clicked answers stored in the demo user seed.")
-    parser.add_argument("--max-recent-queries", type=int, default=5, help="Maximum recent queries stored in the demo user seed.")
-    parser.add_argument("--max-replay-events", type=int, default=200, help="Maximum replay events written for the demo user.")
-    parser.add_argument("--search-window-seconds", type=int, default=14400, help="Heuristic window for classifying a click as search-result click. Default 14400s (4h) reflects the sparse demo activity: queries and follow-up clicks tend to fall in the same evening; 300s caught zero clicks on the current demo user.")
+    parser.add_argument(
+        "--demo-user-id", type=int, default=None, help="Force a specific demo user ID."
+    )
+    parser.add_argument(
+        "--max-answers",
+        type=int,
+        default=2000,
+        help="Maximum number of answers in the compact demo world.",
+    )
+    parser.add_argument(
+        "--max-hot-answers",
+        type=int,
+        default=200,
+        help="Maximum number of answers in the hot fallback snapshot.",
+    )
+    parser.add_argument(
+        "--max-query-keys",
+        type=int,
+        default=5000,
+        help="Maximum number of query keys kept in query_topic_map.",
+    )
+    parser.add_argument(
+        "--max-topics-per-query",
+        type=int,
+        default=5,
+        help="Maximum topics stored for one query key.",
+    )
+    parser.add_argument(
+        "--max-user-topics",
+        type=int,
+        default=10,
+        help="Maximum user topics used when estimating query-topic co-occurrence.",
+    )
+    parser.add_argument(
+        "--max-topic-weights",
+        type=int,
+        default=10,
+        help="Maximum topics stored in one profile seed.",
+    )
+    parser.add_argument(
+        "--max-recent-clicks",
+        type=int,
+        default=10,
+        help="Maximum recent clicked answers stored in the demo user seed.",
+    )
+    parser.add_argument(
+        "--max-recent-queries",
+        type=int,
+        default=5,
+        help="Maximum recent queries stored in the demo user seed.",
+    )
+    parser.add_argument(
+        "--max-replay-events",
+        type=int,
+        default=200,
+        help="Maximum replay events written for the demo user.",
+    )
+    parser.add_argument(
+        "--search-window-seconds",
+        type=int,
+        default=14400,
+        help="Heuristic window for classifying a click as search-result click. Default 14400s (4h) reflects the sparse demo activity: queries and follow-up clicks tend to fall in the same evening; 300s caught zero clicks on the current demo user.",
+    )
     return parser.parse_args()
 
 
 def ensure_inputs(data_dir: Path) -> None:
     missing = [name for name in REQUIRED_FILES if not (data_dir / name).exists()]
     if missing:
-        raise FileNotFoundError(f"Missing required raw files under {data_dir}: {', '.join(missing)}")
+        raise FileNotFoundError(
+            f"Missing required raw files under {data_dir}: {', '.join(missing)}"
+        )
 
 
 def iter_rows(path: Path) -> Iterable[List[str]]:
@@ -253,7 +308,9 @@ def load_answers(path: Path, topics: Dict[int, dict]) -> Tuple[Dict[int, dict], 
     return answers, answer_topic_rows
 
 
-def collect_impressions(path: Path) -> Tuple[Counter, Counter, DefaultDict[int, List[Tuple[int, int]]]]:
+def collect_impressions(
+    path: Path,
+) -> Tuple[Counter, Counter, DefaultDict[int, List[Tuple[int, int]]]]:
     answer_impressions: Counter = Counter()
     answer_clicks: Counter = Counter()
     user_clicks: DefaultDict[int, List[Tuple[int, int]]] = defaultdict(list)
@@ -276,7 +333,9 @@ def collect_impressions(path: Path) -> Tuple[Counter, Counter, DefaultDict[int, 
     return answer_impressions, answer_clicks, user_clicks
 
 
-def collect_queries(path: Path) -> Tuple[DefaultDict[int, List[Tuple[int, str, List[int]]]], Counter]:
+def collect_queries(
+    path: Path,
+) -> Tuple[DefaultDict[int, List[Tuple[int, str, List[int]]]], Counter]:
     queries_by_user: DefaultDict[int, List[Tuple[int, str, List[int]]]] = defaultdict(list)
     query_freq: Counter = Counter()
     for row in iter_rows(path):
@@ -349,7 +408,9 @@ def build_user_topic_counters(
             user_topics[user_id][topic_id] += 1
             global_topics[topic_id] += 1
 
-    print(f"[derive] user_topic_profiles={len(user_topics)} global_topic_entries={len(global_topics)}")
+    print(
+        f"[derive] user_topic_profiles={len(user_topics)} global_topic_entries={len(global_topics)}"
+    )
     return user_topics, global_topics
 
 
@@ -382,7 +443,9 @@ def build_query_topic_rows(
     seen: set[str] = set()
     for user_id in queries_by_user:
         if user_id == args.demo_user_id:
-            for _, query_key, _ in sorted(queries_by_user[user_id], key=lambda item: item[0], reverse=True):
+            for _, query_key, _ in sorted(
+                queries_by_user[user_id], key=lambda item: item[0], reverse=True
+            ):
                 if query_key not in seen:
                     selected_query_keys.append(query_key)
                     seen.add(query_key)
@@ -400,7 +463,9 @@ def build_query_topic_rows(
         if not topic_counter:
             continue
         total = sum(topic_counter.values()) or 1
-        for rank, (topic_id, raw_score) in enumerate(topic_counter.most_common(args.max_topics_per_query), start=1):
+        for rank, (topic_id, raw_score) in enumerate(
+            topic_counter.most_common(args.max_topics_per_query), start=1
+        ):
             rows.append(
                 {
                     "query_key": query_key,
@@ -543,7 +608,9 @@ def build_demo_event_replay(
             }
         )
 
-    replay.sort(key=lambda item: (item["event_ts"], 0 if item["event_type"] == "search_query" else 1))
+    replay.sort(
+        key=lambda item: (item["event_ts"], 0 if item["event_type"] == "search_query" else 1)
+    )
     if max_replay_events > 0 and len(replay) > max_replay_events:
         replay = replay[-max_replay_events:]
     print(f"[derive] replay_events={len(replay)}")
@@ -570,7 +637,9 @@ def build_demo_user_profile_seed(
     ]
     recent_queries = [
         {"query_key": query_key, "query_ts": query_ts, "query_tokens": query_tokens}
-        for query_ts, query_key, query_tokens in sorted(demo_queries, reverse=True)[: args.max_recent_queries]
+        for query_ts, query_key, query_tokens in sorted(demo_queries, reverse=True)[
+            : args.max_recent_queries
+        ]
     ]
     return {
         "user_id": demo_user["user_id"],
@@ -614,7 +683,9 @@ def main() -> None:
     users = load_users(args.data_dir / "info_user.csv")
     questions, question_topic_rows = load_questions(args.data_dir / "info_question.csv", topics)
     answers, answer_topic_rows = load_answers(args.data_dir / "info_answer.csv", topics)
-    answer_impressions, answer_clicks, user_clicks = collect_impressions(args.data_dir / "inter_impression.csv")
+    answer_impressions, answer_clicks, user_clicks = collect_impressions(
+        args.data_dir / "inter_impression.csv"
+    )
     queries_by_user, query_freq = collect_queries(args.data_dir / "inter_query.csv")
 
     demo_user_id = choose_demo_user(args.demo_user_id, users, user_clicks, queries_by_user)
@@ -624,8 +695,12 @@ def main() -> None:
     user_topics, global_topics = build_user_topic_counters(users, answers, user_clicks)
     query_topic_rows = build_query_topic_rows(args, users, user_topics, queries_by_user, query_freq)
     ranked_answer_ids = rank_answers_by_hotness(answer_impressions, answer_clicks)
-    hot_snapshot = build_hot_snapshot(ranked_answer_ids, answer_impressions, answer_clicks, args.max_hot_answers)
-    selected_answer_ids = choose_selected_answers(args.max_answers, ranked_answer_ids, user_clicks.get(demo_user_id, []))
+    hot_snapshot = build_hot_snapshot(
+        ranked_answer_ids, answer_impressions, answer_clicks, args.max_hot_answers
+    )
+    selected_answer_ids = choose_selected_answers(
+        args.max_answers, ranked_answer_ids, user_clicks.get(demo_user_id, [])
+    )
     selected_answer_set = set(selected_answer_ids)
 
     selected_question_ids = {
@@ -646,8 +721,16 @@ def main() -> None:
         selected_topic_ids.update(questions[question_id]["topic_ids"])
     for row in query_topic_rows:
         selected_topic_ids.add(row["topic_id"])
-    selected_topic_ids.update(topic["topic_id"] for topic in build_default_profile_seed(global_topics, args.max_topic_weights)["topic_weights"])
-    selected_topic_ids.update(topic["topic_id"] for topic in top_weighted_topics(user_topics[demo_user_id], args.max_topic_weights))
+    selected_topic_ids.update(
+        topic["topic_id"]
+        for topic in build_default_profile_seed(global_topics, args.max_topic_weights)[
+            "topic_weights"
+        ]
+    )
+    selected_topic_ids.update(
+        topic["topic_id"]
+        for topic in top_weighted_topics(user_topics[demo_user_id], args.max_topic_weights)
+    )
 
     answer_rows = []
     for answer_id in selected_answer_ids:
@@ -660,11 +743,25 @@ def main() -> None:
         row["impression_count"] = answer_impressions[answer_id]
         answer_rows.append(row)
 
-    question_rows = [questions[question_id] for question_id in sorted(selected_question_ids) if question_id in questions]
-    author_rows = [authors[author_id] for author_id in sorted(selected_author_ids) if author_id in authors]
+    question_rows = [
+        questions[question_id]
+        for question_id in sorted(selected_question_ids)
+        if question_id in questions
+    ]
+    author_rows = [
+        authors[author_id] for author_id in sorted(selected_author_ids) if author_id in authors
+    ]
     topic_rows = [topics[topic_id] for topic_id in sorted(selected_topic_ids) if topic_id in topics]
-    answer_topic_selected = [row for row in answer_topic_rows if row["answer_id"] in selected_answer_set and row["topic_id"] in selected_topic_ids]
-    question_topic_selected = [row for row in question_topic_rows if row["question_id"] in selected_question_ids and row["topic_id"] in selected_topic_ids]
+    answer_topic_selected = [
+        row
+        for row in answer_topic_rows
+        if row["answer_id"] in selected_answer_set and row["topic_id"] in selected_topic_ids
+    ]
+    question_topic_selected = [
+        row
+        for row in question_topic_rows
+        if row["question_id"] in selected_question_ids and row["topic_id"] in selected_topic_ids
+    ]
 
     demo_queries = queries_by_user.get(demo_user_id, [])
     demo_clicks = user_clicks.get(demo_user_id, [])
@@ -692,11 +789,21 @@ def main() -> None:
         "author.jsonl": write_jsonl(args.output_dir / "author.jsonl", author_rows),
         "topic.jsonl": write_jsonl(args.output_dir / "topic.jsonl", topic_rows),
         "app_user.jsonl": write_jsonl(args.output_dir / "app_user.jsonl", [users[demo_user_id]]),
-        "answer_topic.jsonl": write_jsonl(args.output_dir / "answer_topic.jsonl", answer_topic_selected),
-        "question_topic.jsonl": write_jsonl(args.output_dir / "question_topic.jsonl", question_topic_selected),
-        "query_topic_map.jsonl": write_jsonl(args.output_dir / "query_topic_map.jsonl", query_topic_rows),
-        "hot_answer_snapshot.jsonl": write_jsonl(args.output_dir / "hot_answer_snapshot.jsonl", hot_snapshot),
-        "demo_event_replay.jsonl": write_jsonl(args.output_dir / "demo_event_replay.jsonl", replay_events),
+        "answer_topic.jsonl": write_jsonl(
+            args.output_dir / "answer_topic.jsonl", answer_topic_selected
+        ),
+        "question_topic.jsonl": write_jsonl(
+            args.output_dir / "question_topic.jsonl", question_topic_selected
+        ),
+        "query_topic_map.jsonl": write_jsonl(
+            args.output_dir / "query_topic_map.jsonl", query_topic_rows
+        ),
+        "hot_answer_snapshot.jsonl": write_jsonl(
+            args.output_dir / "hot_answer_snapshot.jsonl", hot_snapshot
+        ),
+        "demo_event_replay.jsonl": write_jsonl(
+            args.output_dir / "demo_event_replay.jsonl", replay_events
+        ),
     }
 
     write_json(args.output_dir / "default_profile_seed.json", default_profile_seed)

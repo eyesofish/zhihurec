@@ -3,7 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from backend.app.dependencies import get_event_service
-from backend.app.schemas.event import EventAckResponse, RecommendationClickRequest, SearchResultClickRequest
+from backend.app.schemas.event import (
+    EventAckResponse,
+    RecommendationClickRequest,
+    SearchResultClickRequest,
+)
 from backend.app.services.event import EventService
 
 router = APIRouter(prefix="/event", tags=["event"])
@@ -23,4 +27,3 @@ def search_result_click(
     service: EventService = Depends(get_event_service),
 ) -> EventAckResponse:
     return service.record_search_result_click(payload)
-

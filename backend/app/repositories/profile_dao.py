@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from backend.app.repositories._utils import (
-    parse_json,
     parse_recent_clicks,
     parse_recent_queries,
     parse_topic_weights,
@@ -12,7 +11,6 @@ from backend.app.repositories._utils import (
 from backend.app.schemas.profile import (
     DebugProfileResponse,
     ProfileRecentQuery,
-    ProfileTopicWeight,
     VectorSummary,
 )
 

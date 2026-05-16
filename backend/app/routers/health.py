@@ -21,4 +21,3 @@ def healthz(
         repository_backend=repository_backend,
         database_configured=settings.database_configured,
     )
-

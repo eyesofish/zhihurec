@@ -10,4 +10,3 @@ class RepositoryNotReadyError(RuntimeError):
             "The backend skeleton is live, but SQL-backed handlers are the next step."
         )
         self.operation = operation
-

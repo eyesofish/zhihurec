@@ -23,4 +23,3 @@ class HealthResponse(ApiModel):
     app_version: str
     repository_backend: str
     database_configured: bool
-

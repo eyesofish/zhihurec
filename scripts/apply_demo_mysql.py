@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,10 +19,16 @@ class MysqlUrl:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Apply ZhihuRec V1 schema and demo seed SQL to MySQL.")
+    parser = argparse.ArgumentParser(
+        description="Apply ZhihuRec V1 schema and demo seed SQL to MySQL."
+    )
     parser.add_argument("--schema-sql", default="sql/v1_schema.sql", help="Schema SQL file.")
-    parser.add_argument("--seed-sql", default="build/demo_world/import_demo_world.sql", help="Seed SQL file.")
-    parser.add_argument("--dry-run", action="store_true", help="Only verify inputs and print the target.")
+    parser.add_argument(
+        "--seed-sql", default="build/demo_world/import_demo_world.sql", help="Seed SQL file."
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Only verify inputs and print the target."
+    )
     return parser.parse_args()
 
 

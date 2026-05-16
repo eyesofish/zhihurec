@@ -6,14 +6,17 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Replay demo events through the ZhihuRec backend HTTP API.")
+    parser = argparse.ArgumentParser(
+        description="Replay demo events through the ZhihuRec backend HTTP API."
+    )
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Backend base URL.")
-    parser.add_argument("--input", default="build/demo_world/demo_event_replay.jsonl", help="Replay JSONL file.")
+    parser.add_argument(
+        "--input", default="build/demo_world/demo_event_replay.jsonl", help="Replay JSONL file."
+    )
     parser.add_argument("--limit", type=int, default=20, help="Maximum number of events to replay.")
     return parser.parse_args()
 
@@ -113,7 +116,9 @@ def main() -> None:
         except HTTPError as exc:
             failed_count += 1
             body = exc.read().decode("utf-8", errors="replace")
-            print(f"{index}: {event.get('event_type')} -> {path} failed status={exc.code} body={body}")
+            print(
+                f"{index}: {event.get('event_type')} -> {path} failed status={exc.code} body={body}"
+            )
         except URLError as exc:
             failed_count += 1
             print(f"{index}: {event.get('event_type')} -> {path} failed error={exc.reason}")
