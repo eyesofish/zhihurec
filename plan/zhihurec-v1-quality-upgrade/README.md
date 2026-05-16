@@ -137,3 +137,4 @@ C. 全部 E1-E7 完成后，gap-checklist 末尾追加一行 cross-reference（E
 - 2026-05-16 - E4 - mypy 0 issues across 31 source files；0 个 type: ignore；补 explicit_package_bases 解决 backend/app 模块映射冲突。
 - 2026-05-16 - E5 - tests/ skeleton + 4 test files 落地；pytest 默认层 21 passed / 0 failed；mypy 继续 0 issues。
 - 2026-05-16 - E6 - tests/test_mysql_smoke.py 4 tests 通过；默认 pytest 21 passed / 4 deselected，-m mysql 显式跑 4 passed；mypy 继续 0 issues。
+- 2026-05-16 - E7 - 根 README 落地；全套验证通过（pip install dev deps、ruff、mypy、pytest default 21 passed/4 deselected、pytest mysql 4 passed、SmokeTest）；gap-checklist 加 cross-ref。
