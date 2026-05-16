@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parents[1]
+PY = sys.executable
+
+
+@pytest.fixture
+def unwired_client() -> TestClient:
+    """TestClient forced onto UnwiredRuntimeRepository.
+
+    Bypasses any ZHIHUREC_DATABASE_URL set in the developer's shell so the test
+    is hermetic regardless of environment.
+    """
+    from backend.app.config import Settings, get_settings
+    from backend.app.dependencies import (
+        get_app_settings,
+        get_event_service,
+        get_feed_service,
+        get_profile_service,
+        get_repository_backend_name,
+        get_runtime_repository,
+        get_search_service,
+    )
+    from backend.app.main import create_app
+    from backend.app.repositories.unwired import UnwiredRuntimeRepository
+    from backend.app.services.event import EventService
+    from backend.app.services.feed import FeedService
+    from backend.app.services.profile import ProfileService
+    from backend.app.services.search import SearchService
+
+    get_settings.cache_clear()
+    get_runtime_repository.cache_clear()
+    settings = Settings()
+    unwired = UnwiredRuntimeRepository(settings)
+    app = create_app()
+    app.dependency_overrides[get_app_settings] = lambda: settings
+    app.dependency_overrides[get_repository_backend_name] = lambda: unwired.backend_name
+    app.dependency_overrides[get_feed_service] = lambda: FeedService(unwired)
+    app.dependency_overrides[get_search_service] = lambda: SearchService(unwired)
+    app.dependency_overrides[get_event_service] = lambda: EventService(unwired)
+    app.dependency_overrides[get_profile_service] = lambda: ProfileService(unwired)
+    return TestClient(app)
+
+
+def _database_url() -> str:
+    return os.environ.get("ZHIHUREC_DATABASE_URL", "").strip()
+
+
+@pytest.fixture(scope="session")
+def mysql_demo_user() -> int:
+    """Reset demo user 7248 once per test session so behavior_score deltas are predictable."""
+    if not _database_url():
+        pytest.skip("ZHIHUREC_DATABASE_URL not set")
+    subprocess.run(
+        [PY, str(ROOT / "scripts" / "reset_demo_user.py")],
+        check=True,
+        cwd=ROOT,
+    )
+    return 7248
+
+
+@pytest.fixture
+def mysql_client() -> TestClient:
+    """TestClient backed by the real MysqlRuntimeRepository.
+
+    Requires ZHIHUREC_DATABASE_URL to be set when the test process starts.
+    """
+    if not _database_url():
+        pytest.skip("ZHIHUREC_DATABASE_URL not set")
+    from backend.app.config import get_settings
+    from backend.app.dependencies import get_runtime_repository
+    from backend.app.main import create_app
+
+    get_settings.cache_clear()
+    get_runtime_repository.cache_clear()
+    return TestClient(create_app())
