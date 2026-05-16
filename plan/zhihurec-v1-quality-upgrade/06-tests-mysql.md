@@ -3,7 +3,8 @@
 ## 这一步做什么
 
 1. 新建 `tests/test_mysql_smoke.py`，包含 4 个 `@pytest.mark.mysql` 测试。
-2. 在 docker compose up + 设置 DATABASE_URL 的前提下跑通。
+2. 在 `pyproject.toml` 里设置默认 `pytest` 排除 mysql marker，保证无 docker 时也能直接跑默认层。
+3. 在 docker compose up + 设置 DATABASE_URL 的前提下跑通。
 
 ## 为什么
 
@@ -118,14 +119,24 @@ def test_search_then_feed_shows_recall_candidates(mysql_client, mysql_demo_user)
     assert sources, "expected at least one recall_candidate source"
 ```
 
-### 2. ruff format + lint
+### 2. 确认默认 pytest 排除 mysql marker
+
+`pyproject.toml` 的 `[tool.pytest.ini_options]` 需要包含：
+
+```toml
+addopts = ["-m", "not mysql"]
+```
+
+这样默认 `python -m pytest` 不需要 docker；显式 `python -m pytest -m mysql` 会覆盖默认 marker expression。
+
+### 3. ruff format + lint
 
 ```powershell
 & 'C:\ProgramData\anaconda3\python.exe' -m ruff format tests\
 & 'C:\ProgramData\anaconda3\python.exe' -m ruff check tests\
 ```
 
-### 3. 跑
+### 4. 跑
 
 ```powershell
 # 默认 pytest 仍不跑 mysql 测试（应 skip 4 个）
