@@ -54,6 +54,18 @@ logs/
 # Local plan scratch notes
 /plan/zhihurec-v1-quality-upgrade/README.md
 
+# Playwright MCP session artifacts
+.playwright-mcp/
+
+# Screenshots (temporary work in progress)
+*.png
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Root-level lock file (product-frontend has its own)
+/package-lock.json
+
 # OS and editor noise
 .DS_Store
 Thumbs.db
