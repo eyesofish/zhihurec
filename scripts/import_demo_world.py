@@ -33,6 +33,12 @@ REQUIRED_INPUTS = [
     "demo_event_replay.jsonl",
 ]
 
+# Optional inputs (multi-persona); the importer falls back to single-persona behaviour when absent.
+OPTIONAL_INPUTS = [
+    "demo_persona_profile_seeds.json",
+    "demo_personas.json",
+]
+
 DELETE_ORDER = [
     "user_event",
     "user_profile",
@@ -348,28 +354,41 @@ def build_system_profile_seed_rows(input_dir: Path) -> List[Tuple[object, ...]]:
 
 
 def build_user_profile_rows(input_dir: Path) -> List[Tuple[object, ...]]:
-    row = load_json(input_dir / "demo_user_profile_seed.json")
-    recent_clicks = row.get("recent_clicked_answers", [])
-    recent_queries = row.get("recent_queries", [])
-    last_event_ts = max_defined(
-        [
-            max_nested_ts(recent_clicks, "click_ts"),
-            max_nested_ts(recent_queries, "query_ts"),
-        ]
-    )
-    return [
-        (
-            row["user_id"],
-            row.get("cold_start_seed_key", "cold_start_default"),
-            to_json_text(row.get("topic_weights", [])),
-            to_json_text(recent_clicks),
-            to_json_text(recent_queries),
-            row.get("behavior_score", 0),
-            None,
-            row.get("notes"),
-            last_event_ts,
+    persona_seeds_path = input_dir / "demo_persona_profile_seeds.json"
+    if persona_seeds_path.exists():
+        persona_rows = load_json(persona_seeds_path)
+        if not isinstance(persona_rows, list):
+            raise ValueError(
+                f"{persona_seeds_path} must contain a JSON list of persona profile seeds"
+            )
+        seeds = persona_rows
+    else:
+        seeds = [load_json(input_dir / "demo_user_profile_seed.json")]
+
+    rows: List[Tuple[object, ...]] = []
+    for seed in seeds:
+        recent_clicks = seed.get("recent_clicked_answers", [])
+        recent_queries = seed.get("recent_queries", [])
+        last_event_ts = max_defined(
+            [
+                max_nested_ts(recent_clicks, "click_ts"),
+                max_nested_ts(recent_queries, "query_ts"),
+            ]
         )
-    ]
+        rows.append(
+            (
+                seed["user_id"],
+                seed.get("cold_start_seed_key", "cold_start_default"),
+                to_json_text(seed.get("topic_weights", [])),
+                to_json_text(recent_clicks),
+                to_json_text(recent_queries),
+                seed.get("behavior_score", 0),
+                None,
+                seed.get("notes"),
+                last_event_ts,
+            )
+        )
+    return rows
 
 
 def build_user_event_rows(input_dir: Path) -> List[Tuple[object, ...]]:

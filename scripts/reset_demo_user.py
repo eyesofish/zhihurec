@@ -5,6 +5,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,11 +21,27 @@ class MysqlUrl:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Reset the single ZhihuRec demo user's profile.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Reset ZhihuRec demo user profiles. By default all personas in the "
+            "multi-persona seed are reset; pass --user-id to reset only one persona."
+        )
+    )
     parser.add_argument(
         "--profile-seed",
         default="build/demo_world/demo_user_profile_seed.json",
-        help="Demo user profile seed JSON.",
+        help="Legacy single-persona demo user profile seed JSON.",
+    )
+    parser.add_argument(
+        "--persona-seeds",
+        default="build/demo_world/demo_persona_profile_seeds.json",
+        help="Multi-persona demo user profile seed JSON (preferred when present).",
+    )
+    parser.add_argument(
+        "--user-id",
+        type=int,
+        default=None,
+        help="If set, reset only the persona with this user_id. Otherwise reset every persona in the seed.",
     )
     return parser.parse_args()
 
@@ -77,74 +94,101 @@ def max_ts(rows: list[dict], field: str) -> int | None:
     return max(values) if values else None
 
 
+def load_seeds(persona_seeds_path: Path, legacy_seed_path: Path) -> list[dict]:
+    if persona_seeds_path.exists():
+        payload = json.loads(persona_seeds_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise SystemExit(f"{persona_seeds_path} must contain a JSON list")
+        return payload
+    if legacy_seed_path.exists():
+        payload = json.loads(legacy_seed_path.read_text(encoding="utf-8"))
+        return [payload]
+    raise SystemExit(
+        f"no profile seed found: tried {persona_seeds_path} and {legacy_seed_path}"
+    )
+
+
+def filter_seeds(seeds: Iterable[dict], user_id: int | None) -> list[dict]:
+    if user_id is None:
+        return list(seeds)
+    filtered = [seed for seed in seeds if int(seed["user_id"]) == user_id]
+    if not filtered:
+        raise SystemExit(f"--user-id {user_id} not present in the loaded seed(s)")
+    return filtered
+
+
+def reset_one(cursor, seed: dict) -> tuple[int, int, int]:
+    recent_clicks = seed.get("recent_clicked_answers", [])
+    recent_queries = seed.get("recent_queries", [])
+    candidate_ts = [
+        max_ts(recent_clicks, "click_ts"),
+        max_ts(recent_queries, "query_ts"),
+        0,
+    ]
+    last_event_ts = max(value for value in candidate_ts if value is not None)
+    cursor.execute(
+        """
+        INSERT INTO user_profile (
+          user_id,
+          cold_start_seed_key,
+          topic_weights_json,
+          recent_clicked_answers_json,
+          recent_queries_json,
+          behavior_score,
+          user_vector_json,
+          notes,
+          last_event_ts
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, NULL, %s, %s)
+        ON DUPLICATE KEY UPDATE
+          cold_start_seed_key = VALUES(cold_start_seed_key),
+          topic_weights_json = VALUES(topic_weights_json),
+          recent_clicked_answers_json = VALUES(recent_clicked_answers_json),
+          recent_queries_json = VALUES(recent_queries_json),
+          behavior_score = VALUES(behavior_score),
+          user_vector_json = VALUES(user_vector_json),
+          notes = VALUES(notes),
+          last_event_ts = VALUES(last_event_ts)
+        """,
+        (
+            seed["user_id"],
+            seed.get("cold_start_seed_key", "cold_start_default"),
+            json_text(seed.get("topic_weights", [])),
+            json_text(recent_clicks),
+            json_text(recent_queries),
+            seed.get("behavior_score", 0.0),
+            seed.get("notes"),
+            last_event_ts,
+        ),
+    )
+    return seed["user_id"], len(recent_clicks), len(recent_queries)
+
+
 def main() -> None:
     args = parse_args()
-    profile_seed = repo_path(args.profile_seed)
-    if not profile_seed.exists():
-        raise SystemExit(f"profile seed not found: {profile_seed}")
+    persona_seeds_path = repo_path(args.persona_seeds)
+    legacy_seed_path = repo_path(args.profile_seed)
 
     database_url = os.getenv("ZHIHUREC_DATABASE_URL", "").strip()
     if not database_url:
         raise SystemExit("ZHIHUREC_DATABASE_URL is required")
 
     config = parse_database_url(database_url)
-    row = json.loads(profile_seed.read_text(encoding="utf-8"))
-    recent_clicks = row.get("recent_clicked_answers", [])
-    recent_queries = row.get("recent_queries", [])
-    last_event_ts = max(
-        value
-        for value in (
-            max_ts(recent_clicks, "click_ts"),
-            max_ts(recent_queries, "query_ts"),
-            0,
-        )
-        if value is not None
-    )
+    seeds = load_seeds(persona_seeds_path, legacy_seed_path)
+    seeds = filter_seeds(seeds, args.user_id)
 
     connection = connect(config)
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                INSERT INTO user_profile (
-                  user_id,
-                  cold_start_seed_key,
-                  topic_weights_json,
-                  recent_clicked_answers_json,
-                  recent_queries_json,
-                  behavior_score,
-                  user_vector_json,
-                  notes,
-                  last_event_ts
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, NULL, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                  cold_start_seed_key = VALUES(cold_start_seed_key),
-                  topic_weights_json = VALUES(topic_weights_json),
-                  recent_clicked_answers_json = VALUES(recent_clicked_answers_json),
-                  recent_queries_json = VALUES(recent_queries_json),
-                  behavior_score = VALUES(behavior_score),
-                  user_vector_json = VALUES(user_vector_json),
-                  notes = VALUES(notes),
-                  last_event_ts = VALUES(last_event_ts)
-                """,
-                (
-                    row["user_id"],
-                    row.get("cold_start_seed_key", "cold_start_default"),
-                    json_text(row.get("topic_weights", [])),
-                    json_text(recent_clicks),
-                    json_text(recent_queries),
-                    row.get("behavior_score", 0.0),
-                    row.get("notes"),
-                    last_event_ts,
-                ),
-            )
+            for seed in seeds:
+                user_id, click_count, query_count = reset_one(cursor, seed)
+                print(f"reset user_profile user_id={user_id}")
+                print(f"  recent_clicked_answers={click_count}")
+                print(f"  recent_queries={query_count}")
     finally:
         connection.close()
 
-    print(f"reset user_profile user_id={row['user_id']}")
-    print(f"recent_clicked_answers={len(recent_clicks)}")
-    print(f"recent_queries={len(recent_queries)}")
+    print(f"reset complete: personas={len(seeds)}")
 
 
 if __name__ == "__main__":
