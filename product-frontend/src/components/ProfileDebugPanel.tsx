@@ -76,8 +76,8 @@ export default function ProfileDebugPanel({ userId, refreshTick }: Props) {
           <div className="zr-profile-debug__row zr-profile-debug__row--muted" style={{ fontWeight: 600 }}>
             <span>Recent Clicks</span>
           </div>
-          {data.recent_clicked_answers.slice(0, 5).map((rc) => (
-            <div key={rc.answer_id} className="zr-profile-debug__row zr-profile-debug__row--muted">
+          {data.recent_clicked_answers.slice(0, 5).map((rc, i) => (
+            <div key={`${rc.answer_id}-${i}`} className="zr-profile-debug__row zr-profile-debug__row--muted">
               <span>Answer {rc.answer_id}</span>
               <span>{new Date(rc.click_ts * 1000).toLocaleDateString()}</span>
             </div>
