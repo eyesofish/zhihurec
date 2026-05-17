@@ -8,6 +8,7 @@ from backend.app.repositories.mysql import MysqlRuntimeRepository
 from backend.app.repositories.unwired import UnwiredRuntimeRepository
 from backend.app.services.event import EventService
 from backend.app.services.feed import FeedService
+from backend.app.services.product import ProductService
 from backend.app.services.profile import ProfileService
 from backend.app.services.search import SearchService
 
@@ -34,6 +35,10 @@ def get_event_service() -> EventService:
 
 def get_profile_service() -> ProfileService:
     return ProfileService(get_runtime_repository())
+
+
+def get_product_service() -> ProductService:
+    return ProductService(get_runtime_repository())
 
 
 def get_repository_backend_name() -> str:

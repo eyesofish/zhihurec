@@ -3,14 +3,18 @@ from __future__ import annotations
 from backend.app.config import Settings
 from backend.app.errors import RepositoryNotReadyError
 from backend.app.repositories.base import RuntimeRepository
+from backend.app.schemas.answer import AnswerCardResponse
 from backend.app.schemas.event import (
     EventAckResponse,
     RecommendationClickRequest,
     SearchResultClickRequest,
 )
+from backend.app.schemas.event_track import EventTrackRequest, EventTrackResponse
 from backend.app.schemas.feed import FeedResponse
+from backend.app.schemas.persona import PersonaListResponse
 from backend.app.schemas.profile import DebugProfileResponse
 from backend.app.schemas.search import SearchRequest, SearchResponse
+from backend.app.schemas.suggestion import SuggestionListResponse
 
 
 class UnwiredRuntimeRepository(RuntimeRepository):
@@ -33,3 +37,15 @@ class UnwiredRuntimeRepository(RuntimeRepository):
 
     def get_debug_profile(self, user_id: int) -> DebugProfileResponse:
         raise RepositoryNotReadyError("GET /debug/profile")
+
+    def list_personas(self, limit: int) -> PersonaListResponse:
+        raise RepositoryNotReadyError("GET /personas")
+
+    def list_search_suggestions(self, limit: int) -> SuggestionListResponse:
+        raise RepositoryNotReadyError("GET /search/suggestions")
+
+    def get_answer_card(self, answer_id: int) -> AnswerCardResponse:
+        raise RepositoryNotReadyError("GET /answers/{answer_id}")
+
+    def record_tracked_event(self, payload: EventTrackRequest) -> EventTrackResponse:
+        raise RepositoryNotReadyError("POST /event/track")

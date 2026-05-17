@@ -308,8 +308,114 @@ Query params:
 }
 ```
 
+## Product API (Reddit-Like Product Frontend)
+
+These endpoints back the React/Vite product frontend at `product-frontend/` (port 5174).
+The debug endpoints above remain available for the legacy debug console at port 5173.
+
+### `GET /personas`
+List all demo personas (rows in `app_user` with `is_demo_user = 1`), highest behavior_score first.
+
+Query params: `limit` (default 10, 1-50).
+
+Response:
+```json
+{
+  "items": [
+    {
+      "user_id": 7248,
+      "display_name": "User 7248",
+      "behavior_score": 365.0,
+      "top_topics": [{"topic_id": 46, "weight": 0.083333}]
+    }
+  ]
+}
+```
+
+### `GET /search/suggestions`
+Suggest natural-language queries derived from `query_topic_map`. The `query_key` is submit-ready and must be POSTed to `/search` unchanged.
+
+Query params: `limit` (default 12, 1-50).
+
+Response:
+```json
+{
+  "items": [
+    {"query_key": "248 12125", "label": "Query 248 12125", "topic_count": 5}
+  ]
+}
+```
+
+`label` uses `query_topic_map.display_query` when present and falls back to `Query {query_key}`.
+
+### `GET /answers/{answer_id}`
+Return the answer card payload used by `/post/:answerId` in the product frontend.
+
+Response:
+```json
+{
+  "answer_id": 123,
+  "question_id": 456,
+  "question_title": "Question 456",
+  "answer_summary": "Synthetic answer summary for answer 123.",
+  "author": {"author_id": 9, "display_name": "Author 9"},
+  "topics": [{"topic_id": 46, "display_name": "Topic 46"}]
+}
+```
+
+Returns 404 if the `answer_id` is unknown.
+
+### `POST /event/track`
+Unified event sink used by Reddit-like interactions.
+
+Request:
+```json
+{
+  "user_id": 7248,
+  "event_type": "upvote",
+  "surface": "home_feed",
+  "answer_id": 123,
+  "query_key": null,
+  "request_id": "feed-...",
+  "dwell_ms": null,
+  "debug": true
+}
+```
+
+Allowed `event_type` values:
+- `feed_impression`
+- `detail_view`
+- `dwell`
+- `upvote`
+- `downvote`
+- `share`
+- `recommendation_click`
+- `search_result_click`
+
+Profile-update rules:
+- `recommendation_click` → delegates to existing recommendation-click flow.
+- `search_result_click` → delegates to existing search-result-click flow (requires `query_key`).
+- `upvote` → same positive profile update as `recommendation_click`; written to `user_event` with `event_type = 'upvote'`.
+- `feed_impression`, `detail_view`, `dwell`, `downvote`, `share` → log-only (`user_event` insert only).
+
+Response:
+```json
+{
+  "ok": true,
+  "event_type": "upvote",
+  "profile_updated": true,
+  "behavior_score": 368.0
+}
+```
+
+`profile_updated` is `false` and `behavior_score` is `null` for log-only events.
+
+The legacy endpoints `POST /event/recommendation_click` and `POST /event/search_result_click` remain available unchanged for the debug frontend.
+
 ## Verification Checklist
 - `GET /feed` must read project-owned answers and profile state, not raw CSV rows.
 - `POST /search` must persist `search_query` intent and read `query_topic_map`.
 - Click endpoints must update `user_profile` and write `user_event`.
 - `GET /debug/profile` must expose the profile that the recommender actually uses.
+- `GET /personas` must return ≥ 1 row when `app_user.is_demo_user` is populated.
+- `POST /event/track` `upvote` must mutate `behavior_score` by `recommendation_click_behavior_delta`; log-only events must leave it unchanged.

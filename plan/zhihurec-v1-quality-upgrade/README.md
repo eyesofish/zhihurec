@@ -138,3 +138,9 @@ C. 全部 E1-E7 完成后，gap-checklist 末尾追加一行 cross-reference（E
 - 2026-05-16 - E5 - tests/ skeleton + 4 test files 落地；pytest 默认层 21 passed / 0 failed；mypy 继续 0 issues。
 - 2026-05-16 - E6 - tests/test_mysql_smoke.py 4 tests 通过；默认 pytest 21 passed / 4 deselected，-m mysql 显式跑 4 passed；mypy 继续 0 issues。
 - 2026-05-16 - E7 - 根 README 落地；全套验证通过（pip install dev deps、ruff、mypy、pytest default 21 passed/4 deselected、pytest mysql 4 passed、SmokeTest）；gap-checklist 加 cross-ref。
+
+---
+
+## Cross-reference
+
+本 plan 已在 `plan/zhihurec-v1-gap-checklist/README.md` 的 Verification log 中以一行收口（`2026-05-16 — E plan complete — plan/zhihurec-v1-quality-upgrade/ 7 步全部完成`）。两份文件互为索引；gap-checklist 顶部"当前状态总览（2026-05-16 snapshot）"段也把本 plan 列在已关闭工作里。E 计划完成即标志着 V1 进入收尾，下一段工作在 `D:\Github\reco_learn_path\upgrade_v2` 仓库进行，本 plan "与 upgrade_v2 的接口考虑" 段已列明衔接预留。

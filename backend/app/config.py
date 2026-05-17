@@ -23,7 +23,12 @@ class Settings:
     cold_start_alpha_ceiling: float = 0.95
     cold_start_behavior_score_scale: float = 30.0
     cold_start_default_seed_key: str = "cold_start_default"
-    cors_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
+    cors_origins: tuple[str, ...] = (
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+    )
 
     @property
     def database_configured(self) -> bool:
@@ -74,7 +79,7 @@ def get_settings() -> Settings:
             origin.strip()
             for origin in os.getenv(
                 "ZHIHUREC_CORS_ORIGINS",
-                "http://127.0.0.1:5173,http://localhost:5173",
+                "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174",
             ).split(",")
             if origin.strip()
         ),

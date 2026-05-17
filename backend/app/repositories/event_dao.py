@@ -122,6 +122,55 @@ def record_click_event(
         )
 
 
+def record_log_only_event(
+    connection: Any,
+    user_id: int,
+    event_type: str,
+    surface: str,
+    answer_id: int | None,
+    query_key: str | None,
+    request_id: str | None,
+    event_ts: int,
+    debug_payload_json: str | None,
+) -> None:
+    """Insert a user_event row without mutating user_profile.
+
+    Used by Reddit-like Product events (feed_impression, detail_view, dwell, downvote, share)
+    that we log for analytics but that do not update behavior_score or topic weights in V1.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO user_event (
+              user_id,
+              event_type,
+              answer_id,
+              query_key,
+              query_tokens_json,
+              topic_ids_json,
+              surface,
+              request_id,
+              source_confidence,
+              event_ts,
+              debug_payload_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'not_applicable', %s, %s)
+            """,
+            (
+                user_id,
+                event_type,
+                answer_id,
+                query_key,
+                json_text(query_tokens(query_key)) if query_key else None,
+                None,
+                surface,
+                request_id,
+                event_ts,
+                debug_payload_json,
+            ),
+        )
+
+
 def apply_click_profile_update(
     connection: Any,
     profile_row: dict[str, Any],

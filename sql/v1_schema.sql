@@ -189,7 +189,17 @@ CREATE TABLE user_profile (
 CREATE TABLE user_event (
   event_id BIGINT NOT NULL AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
-  event_type ENUM('search_query', 'recommendation_click', 'search_result_click') NOT NULL,
+  event_type ENUM(
+    'search_query',
+    'recommendation_click',
+    'search_result_click',
+    'feed_impression',
+    'detail_view',
+    'dwell',
+    'upvote',
+    'downvote',
+    'share'
+  ) NOT NULL,
   answer_id BIGINT NULL,
   query_key VARCHAR(512) NULL COMMENT 'Direct query key for search_query or matched_query_key carried by click events.',
   query_tokens_json JSON NULL,

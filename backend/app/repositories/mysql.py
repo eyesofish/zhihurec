@@ -8,6 +8,7 @@ from backend.app.repositories._utils import (
     add_feed_candidate,
     new_request_id,
     normalize_query_key,
+    parse_topic_weights,
     selected_reason,
     topic_delta_models,
 )
@@ -27,6 +28,7 @@ from backend.app.repositories.event_dao import (
     append_recent_query,
     apply_click_profile_update,
     record_click_event,
+    record_log_only_event,
     record_search_query,
 )
 from backend.app.repositories.profile_dao import (
@@ -35,7 +37,8 @@ from backend.app.repositories.profile_dao import (
     load_recent_query_topic_scores,
     profile_from_row,
 )
-from backend.app.schemas.common import AuthorCard
+from backend.app.schemas.answer import AnswerCardResponse
+from backend.app.schemas.common import AuthorCard, TopicCard
 from backend.app.schemas.event import (
     AnswerTopic,
     EventAckResponse,
@@ -46,6 +49,7 @@ from backend.app.schemas.event import (
     SearchResultClickDebug,
     SearchResultClickRequest,
 )
+from backend.app.schemas.event_track import EventTrackRequest, EventTrackResponse
 from backend.app.schemas.feed import (
     ColdStartMix,
     FeedDebugPayload,
@@ -55,6 +59,7 @@ from backend.app.schemas.feed import (
     FeedResponse,
     RecallCandidateDebug,
 )
+from backend.app.schemas.persona import PersonaCard, PersonaListResponse
 from backend.app.schemas.profile import DebugProfileResponse
 from backend.app.schemas.search import (
     SearchDebugPayload,
@@ -64,6 +69,7 @@ from backend.app.schemas.search import (
     SearchResponse,
     SearchResultSource,
 )
+from backend.app.schemas.suggestion import SuggestionItem, SuggestionListResponse
 
 
 class MysqlRuntimeRepository(RuntimeRepository):
@@ -433,6 +439,222 @@ class MysqlRuntimeRepository(RuntimeRepository):
             return profile_from_row(fetch_profile_row(connection, user_id))
         finally:
             connection.close()
+
+    def list_personas(self, limit: int) -> PersonaListResponse:
+        connection = connect(self._connection_config)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                      au.user_id,
+                      au.display_name,
+                      up.behavior_score,
+                      up.topic_weights_json
+                    FROM app_user au
+                    JOIN user_profile up ON up.user_id = au.user_id
+                    WHERE au.is_demo_user = 1
+                    ORDER BY up.behavior_score DESC, au.user_id ASC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cursor.fetchall()
+        finally:
+            connection.close()
+
+        items: list[PersonaCard] = []
+        for row in rows:
+            user_id = int(row["user_id"])
+            top_topics = parse_topic_weights(row.get("topic_weights_json"))[:10]
+            items.append(
+                PersonaCard(
+                    user_id=user_id,
+                    display_name=row.get("display_name") or f"User {user_id}",
+                    behavior_score=float(row.get("behavior_score") or 0.0),
+                    top_topics=top_topics,
+                )
+            )
+        return PersonaListResponse(items=items)
+
+    def list_search_suggestions(self, limit: int) -> SuggestionListResponse:
+        connection = connect(self._connection_config)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                      query_key,
+                      ANY_VALUE(display_query) AS display_query,
+                      COUNT(*) AS topic_count
+                    FROM query_topic_map
+                    GROUP BY query_key
+                    ORDER BY topic_count DESC, query_key ASC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cursor.fetchall()
+        finally:
+            connection.close()
+
+        items = [
+            SuggestionItem(
+                query_key=str(row["query_key"]),
+                label=str(row.get("display_query") or f"Query {row['query_key']}"),
+                topic_count=int(row.get("topic_count") or 0),
+            )
+            for row in rows
+        ]
+        return SuggestionListResponse(items=items)
+
+    def get_answer_card(self, answer_id: int) -> AnswerCardResponse:
+        connection = connect(self._connection_config)
+        try:
+            answer_rows = load_answer_rows(connection, [answer_id])
+            row = answer_rows.get(answer_id)
+            if row is None:
+                raise LookupError(f"answer not found: {answer_id}")
+            topics_by_answer = load_topics_by_answer(connection, [answer_id])
+        finally:
+            connection.close()
+
+        topics: list[TopicCard] = topics_by_answer.get(answer_id, [])
+        question_id = int(row.get("question_id") or 0)
+        author_id = int(row.get("author_id") or 0)
+        return AnswerCardResponse(
+            answer_id=answer_id,
+            question_id=question_id,
+            question_title=row.get("question_title") or f"Question {question_id}",
+            answer_summary=row.get("answer_summary")
+            or f"Synthetic answer summary for answer {answer_id}.",
+            author=AuthorCard(
+                author_id=author_id,
+                display_name=row.get("author_name") or f"Author {author_id}",
+            ),
+            topics=topics,
+        )
+
+    def record_tracked_event(self, payload: EventTrackRequest) -> EventTrackResponse:
+        # Delegate event types that already have rich profile-update logic.
+        if payload.event_type == "recommendation_click":
+            if payload.answer_id is None:
+                raise ValueError("recommendation_click requires answer_id")
+            ack = self.record_recommendation_click(
+                RecommendationClickRequest(
+                    user_id=payload.user_id,
+                    answer_id=payload.answer_id,
+                    request_id=payload.request_id,
+                    debug=payload.debug,
+                )
+            )
+            behavior_score = (
+                ack.debug.behavior_score
+                if isinstance(ack.debug, RecommendationClickDebug)
+                else None
+            )
+            return EventTrackResponse(
+                ok=ack.ok,
+                event_type=payload.event_type,
+                profile_updated=True,
+                behavior_score=behavior_score,
+            )
+
+        if payload.event_type == "search_result_click":
+            if payload.answer_id is None or not payload.query_key:
+                raise ValueError("search_result_click requires answer_id and query_key")
+            ack = self.record_search_result_click(
+                SearchResultClickRequest(
+                    user_id=payload.user_id,
+                    answer_id=payload.answer_id,
+                    query_key=payload.query_key,
+                    request_id=payload.request_id,
+                    debug=payload.debug,
+                )
+            )
+            behavior_score = (
+                ack.debug.behavior_score
+                if isinstance(ack.debug, SearchResultClickDebug)
+                else None
+            )
+            return EventTrackResponse(
+                ok=ack.ok,
+                event_type=payload.event_type,
+                profile_updated=True,
+                behavior_score=behavior_score,
+            )
+
+        if payload.event_type == "upvote":
+            if payload.answer_id is None:
+                raise ValueError("upvote requires answer_id")
+            # Apply the same positive profile update as a recommendation click,
+            # but stamp the user_event row with event_type='upvote' for analytics distinction.
+            event_ts = int(time.time())
+            connection = connect(self._connection_config)
+            try:
+                connection.begin()
+                profile_row = fetch_profile_row(connection, payload.user_id)
+                answer_topic_ids = load_answer_topic_ids(connection, payload.answer_id)
+                topic_deltas = {
+                    topic_id: self._settings.recommendation_click_topic_delta
+                    for topic_id in answer_topic_ids
+                }
+                record_click_event(
+                    connection=connection,
+                    user_id=payload.user_id,
+                    event_type="upvote",
+                    answer_id=payload.answer_id,
+                    query_key=payload.query_key,
+                    request_id=payload.request_id,
+                    surface=payload.surface or "home_feed",
+                    event_ts=event_ts,
+                    topic_ids=answer_topic_ids,
+                )
+                update = apply_click_profile_update(
+                    connection=connection,
+                    profile_row=profile_row,
+                    answer_id=payload.answer_id,
+                    event_ts=event_ts,
+                    topic_deltas=topic_deltas,
+                    behavior_delta=self._settings.recommendation_click_behavior_delta,
+                    decay_factor=self._settings.profile_topic_decay,
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+            return EventTrackResponse(
+                ok=True,
+                event_type=payload.event_type,
+                profile_updated=True,
+                behavior_score=update["behavior_score"],
+            )
+
+        # Log-only events: feed_impression, detail_view, dwell, downvote, share
+        event_ts = int(time.time())
+        connection = connect(self._connection_config)
+        try:
+            record_log_only_event(
+                connection=connection,
+                user_id=payload.user_id,
+                event_type=payload.event_type,
+                surface=payload.surface or "home_feed",
+                answer_id=payload.answer_id,
+                query_key=payload.query_key,
+                request_id=payload.request_id,
+                event_ts=event_ts,
+                debug_payload_json=None,
+            )
+        finally:
+            connection.close()
+        return EventTrackResponse(
+            ok=True,
+            event_type=payload.event_type,
+            profile_updated=False,
+            behavior_score=None,
+        )
 
     # ── orchestrator helpers ────────────────────────────────────
 

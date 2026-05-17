@@ -6,11 +6,15 @@ from fastapi.responses import JSONResponse
 
 from backend.app.config import get_settings
 from backend.app.errors import RepositoryNotReadyError
+from backend.app.routers.answers import router as answers_router
 from backend.app.routers.debug import router as debug_router
 from backend.app.routers.event import router as event_router
+from backend.app.routers.event_track import router as event_track_router
 from backend.app.routers.feed import router as feed_router
 from backend.app.routers.health import router as health_router
+from backend.app.routers.personas import router as personas_router
 from backend.app.routers.search import router as search_router
+from backend.app.routers.suggestions import router as suggestions_router
 
 
 def create_app() -> FastAPI:
@@ -48,6 +52,10 @@ def create_app() -> FastAPI:
     app.include_router(search_router)
     app.include_router(event_router)
     app.include_router(debug_router)
+    app.include_router(personas_router)
+    app.include_router(suggestions_router)
+    app.include_router(answers_router)
+    app.include_router(event_track_router)
 
     return app
 

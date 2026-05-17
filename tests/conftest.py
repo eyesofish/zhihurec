@@ -24,6 +24,7 @@ def unwired_client() -> TestClient:
         get_app_settings,
         get_event_service,
         get_feed_service,
+        get_product_service,
         get_profile_service,
         get_repository_backend_name,
         get_runtime_repository,
@@ -33,6 +34,7 @@ def unwired_client() -> TestClient:
     from backend.app.repositories.unwired import UnwiredRuntimeRepository
     from backend.app.services.event import EventService
     from backend.app.services.feed import FeedService
+    from backend.app.services.product import ProductService
     from backend.app.services.profile import ProfileService
     from backend.app.services.search import SearchService
 
@@ -47,6 +49,7 @@ def unwired_client() -> TestClient:
     app.dependency_overrides[get_search_service] = lambda: SearchService(unwired)
     app.dependency_overrides[get_event_service] = lambda: EventService(unwired)
     app.dependency_overrides[get_profile_service] = lambda: ProfileService(unwired)
+    app.dependency_overrides[get_product_service] = lambda: ProductService(unwired)
     return TestClient(app)
 
 

@@ -23,6 +23,20 @@ _BUSINESS_ENDPOINTS = [
         {"user_id": 7248, "answer_id": 1, "query_key": "248 12125"},
     ),
     ("GET", "/debug/profile", {"user_id": 7248}, None),
+    ("GET", "/personas", {"limit": 10}, None),
+    ("GET", "/search/suggestions", {"limit": 12}, None),
+    ("GET", "/answers/1", None, None),
+    (
+        "POST",
+        "/event/track",
+        None,
+        {
+            "user_id": 7248,
+            "event_type": "feed_impression",
+            "surface": "home_feed",
+            "answer_id": 1,
+        },
+    ),
 ]
 
 

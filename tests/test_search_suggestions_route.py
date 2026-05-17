@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+import os
+
+import pytest
+
+pytestmark = [
+    pytest.mark.mysql,
+    pytest.mark.skipif(
+        not os.environ.get("ZHIHUREC_DATABASE_URL", "").strip(),
+        reason="ZHIHUREC_DATABASE_URL not set; run scripts/init_local.ps1 -SmokeTest first.",
+    ),
+]
+
+
+def test_search_suggestions_returns_submit_ready_query_keys(mysql_client, mysql_demo_user):
+    r = mysql_client.get("/search/suggestions", params={"limit": 12})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert isinstance(body["items"], list)
+    assert len(body["items"]) > 0
+    for item in body["items"]:
+        assert isinstance(item["query_key"], str) and item["query_key"].strip()
+        assert isinstance(item["label"], str) and item["label"]
+        assert item["topic_count"] >= 1
+
+    # The first suggestion's query_key must be usable as-is by POST /search.
+    query_key = body["items"][0]["query_key"]
+    search = mysql_client.post(
+        "/search",
+        json={"user_id": mysql_demo_user, "query_key": query_key, "page_size": 5},
+    )
+    assert search.status_code == 200, search.text

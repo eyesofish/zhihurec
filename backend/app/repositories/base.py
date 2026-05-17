@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from backend.app.schemas.answer import AnswerCardResponse
 from backend.app.schemas.event import (
     EventAckResponse,
     RecommendationClickRequest,
     SearchResultClickRequest,
 )
+from backend.app.schemas.event_track import EventTrackRequest, EventTrackResponse
 from backend.app.schemas.feed import FeedResponse
+from backend.app.schemas.persona import PersonaListResponse
 from backend.app.schemas.profile import DebugProfileResponse
 from backend.app.schemas.search import SearchRequest, SearchResponse
+from backend.app.schemas.suggestion import SuggestionListResponse
 
 
 class RuntimeRepository(Protocol):
@@ -26,3 +30,11 @@ class RuntimeRepository(Protocol):
     def record_search_result_click(self, payload: SearchResultClickRequest) -> EventAckResponse: ...
 
     def get_debug_profile(self, user_id: int) -> DebugProfileResponse: ...
+
+    def list_personas(self, limit: int) -> PersonaListResponse: ...
+
+    def list_search_suggestions(self, limit: int) -> SuggestionListResponse: ...
+
+    def get_answer_card(self, answer_id: int) -> AnswerCardResponse: ...
+
+    def record_tracked_event(self, payload: EventTrackRequest) -> EventTrackResponse: ...
