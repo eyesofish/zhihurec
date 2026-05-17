@@ -5,9 +5,11 @@ param(
     [string]$DatabaseUrl = 'mysql+pymysql://root:root@localhost:3306/zhihurec_demo',
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 5173,
+    [int]$ProductFrontendPort = 5174,
     [int]$MysqlHealthTimeoutSeconds = 120,
     [switch]$SkipBackend,
     [switch]$SkipFrontend,
+    [switch]$ProductFrontend,
     [switch]$SmokeTest
 )
 
@@ -203,6 +205,50 @@ try {
             -Port $FrontendPort
     }
 
+    if ($ProductFrontend) {
+        $pfDir = Join-Path $repoRoot 'product-frontend'
+        if (-not (Test-Path (Join-Path $pfDir 'node_modules'))) {
+            Write-Step 'Installing product frontend dependencies'
+            Invoke-External -FilePath 'npm' -Arguments @('install') -Label 'npm install'
+        }
+
+        if (Test-ListeningPort -Port $ProductFrontendPort) {
+            throw "Product frontend port $ProductFrontendPort is already in use."
+        }
+
+        $pfStdout = Join-Path $runtimeDir 'product-frontend.out.log'
+        $pfStderr = Join-Path $runtimeDir 'product-frontend.err.log'
+        Remove-Item -LiteralPath $pfStdout, $pfStderr -Force -ErrorAction SilentlyContinue
+
+        $pfProcess = Start-Process `
+            -FilePath (Get-Command npx.cmd -ErrorAction Stop).Source `
+            -ArgumentList @('vite', '--host', '127.0.0.1', '--port', "$ProductFrontendPort") `
+            -WorkingDirectory $pfDir `
+            -RedirectStandardOutput $pfStdout `
+            -RedirectStandardError $pfStderr `
+            -WindowStyle Hidden `
+            -PassThru
+
+        Start-Sleep -Seconds 3
+        if ($pfProcess.HasExited) {
+            $errText = ''
+            if (Test-Path $pfStderr) {
+                $errText = (Get-Content $pfStderr -ErrorAction SilentlyContinue | Select-Object -Last 20) -join [Environment]::NewLine
+            }
+            throw "Product frontend exited during startup. $errText"
+        }
+
+        $entry = [pscustomobject]@{
+            Name = 'product-frontend'
+            Process = $pfProcess
+            Port = $ProductFrontendPort
+            Stdout = $pfStdout
+            Stderr = $pfStderr
+        }
+        $startedProcesses.Add($entry) | Out-Null
+        Write-Host "  product-frontend pid=$($pfProcess.Id) url=http://127.0.0.1:$ProductFrontendPort"
+    }
+
     if (-not $SkipBackend) {
         $health = Wait-JsonEndpoint -Name 'Backend health' -Url "http://127.0.0.1:$BackendPort/healthz"
         Write-Host "  repository_backend=$($health.repository_backend)"
@@ -214,15 +260,22 @@ try {
         Wait-HttpEndpoint -Name 'Frontend' -Url "http://127.0.0.1:$FrontendPort/"
     }
 
+    if ($ProductFrontend) {
+        Wait-HttpEndpoint -Name 'Product frontend' -Url "http://127.0.0.1:$ProductFrontendPort/"
+    }
+
     Write-Host ''
     Write-Host 'Ready.' -ForegroundColor Green
     if (-not $SkipBackend) {
-        Write-Host "  Backend:  http://127.0.0.1:$BackendPort"
+        Write-Host "  Backend:          http://127.0.0.1:$BackendPort"
     }
     if (-not $SkipFrontend) {
-        Write-Host "  Frontend: http://127.0.0.1:$FrontendPort"
+        Write-Host "  Debug frontend:   http://127.0.0.1:$FrontendPort"
     }
-    Write-Host "  MySQL:    $DatabaseUrl"
+    if ($ProductFrontend) {
+        Write-Host "  Product frontend: http://127.0.0.1:$ProductFrontendPort"
+    }
+    Write-Host "  MySQL:            $DatabaseUrl"
 
     if ($SmokeTest) {
         Write-Host 'Smoke test passed. Stopping backend/frontend started by this script.' -ForegroundColor Green

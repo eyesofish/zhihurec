@@ -29,7 +29,8 @@ This brings up a dockerised MySQL, applies schema + demo seed, resets the demo u
 
 - **Backend**: Python 3.13, FastAPI, PyMySQL (no ORM)
 - **Storage**: MySQL 8.0 (via `docker compose`, the only online source of truth)
-- **Frontend**: vanilla HTML/CSS/JS served by `python -m http.server` (deliberately no framework)
+- **Frontend (debug)**: vanilla HTML/CSS/JS served by `python -m http.server` on port 5173
+- **Frontend (product)**: React 18 + TypeScript 5.6 + Vite 5.4 on port 5174 — Reddit-inspired product demo (`product-frontend/`)
 - **Offline tooling**: `scripts/build_demo_world.py`, `scripts/replay_demo_events.py`, `scripts/eval_replay_metrics.py`, `scripts/eda.py`
 
 ## Non-goals (by design — see `plan/project_brief_zh.md` §14)
