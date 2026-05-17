@@ -42,9 +42,9 @@ def load_model(model_dir: str | None = None) -> lgb.Booster | None:
 
 
 def score_candidates(feature_dicts: list[dict[str, float]]) -> list[float] | None:
-    """Return predicted click probabilities (0–1) for each candidate row.
+    """Return predicted click probabilities for each candidate row.
 
-    Returns None when the model file hasn't been trained yet — callers should
+    Returns None when the model file has not been trained yet; callers should
     fall back to manual scoring.
     """
     model = load_model()
@@ -61,7 +61,8 @@ def score_candidates(feature_dicts: list[dict[str, float]]) -> list[float] | Non
         cols = list(feature_dicts[0].keys())
         rows = [[row.get(col, 0.0) for col in cols] for row in feature_dicts]
 
-    return model.predict(rows).tolist()
+    raw_scores = model.predict(rows)
+    return [float(score) for score in raw_scores]
 
 
 def build_feature_dict(

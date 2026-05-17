@@ -104,6 +104,11 @@ export interface ProfileRecentQuery {
   query_ts: number;
 }
 
+export interface DebugVectorSummary {
+  vector_key_count: number;
+  top_contributing_topics: ProfileTopicWeight[];
+}
+
 export interface DebugProfileResponse {
   user_id: number;
   cold_start_seed_key: string;
@@ -111,6 +116,7 @@ export interface DebugProfileResponse {
   topic_weights: ProfileTopicWeight[];
   recent_clicked_answers: ProfileRecentClick[];
   recent_queries: ProfileRecentQuery[];
+  vector_summary?: DebugVectorSummary;
 }
 
 export type EventTrackType =

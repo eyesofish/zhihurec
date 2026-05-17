@@ -35,6 +35,8 @@ ignore = [
 "scripts/*.py" = ["B", "SIM", "UP"]
 # eda.py intentionally writes Chinese report text with full-width punctuation.
 "scripts/eda.py" = ["RUF001"]
+# demo_content scripts intentionally generate Chinese display text with full-width punctuation.
+"scripts/demo_content/*.py" = ["RUF001"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -52,6 +54,7 @@ warn_return_any = true
 warn_unused_ignores = true
 no_implicit_optional = true
 check_untyped_defs = true
+incremental = false
 exclude = [
     "^scripts/",
     "^tests/",

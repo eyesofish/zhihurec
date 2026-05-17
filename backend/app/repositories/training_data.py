@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-import pandas as pd
+import pandas as pd  # type: ignore[import-untyped]
 
 from backend.app.config import Settings, compute_alpha
 from backend.app.repositories.content_dao import load_topics_by_answer

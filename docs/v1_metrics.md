@@ -1,5 +1,19 @@
 # ZhihuRec V1 Metrics
 
+## V1 Evaluation Summary For Course Reports
+
+| Evidence type | Metric / artifact | Current value | Interpretation | Limitation / next step |
+|---|---:|---:|---|---|
+| Raw log scale | Feed impressions | 999,970 | Enough observed feed activity to motivate feed-to-search analysis. | Raw data does not include public text content for a production reading experience. |
+| Raw log scale | Search queries | 38,422 | Search is a common behavior, not a rare edge case. | Queries are short and need a topic bridge before they can drive recommendation. |
+| Behavioral hook | Queries with same-user feed exposure in previous 10 minutes | 35.4667% | Supports the research framing that search often follows feed browsing. | This is observational timing evidence, not causal proof. |
+| Mechanism metric | Search Carryover Gain@10 | +0.1000 | The replayed search signal increases later feed topic carryover from 0.9000 to 1.0000. | Topic-level alignment is easier than predicting the exact next clicked answer. |
+| Historical V1 item-ranking baseline | Recall@10 / NDCG@10 | 0.0000 / 0.0000 | The original top-10 feed did not hit held-out clicked answers in the single-snapshot split. | This remains the clean V1 baseline for explaining the retrieval bottleneck. |
+| Historical V1 candidate ceiling probe | Observed candidate_recall@50 | 0.1579 | Only 3/19 held-out clicks appeared in the visible top-50 feed. | Candidate retrieval needed improvement before reranking could matter. |
+| Current V1.5 live rerun | Recall@10 / NDCG@10 | 0.0833 / 0.0315 | With ML/collaborative artifacts present, the live backend now gets nonzero top-10 hits on 60 scored test clicks. | Do not treat this as an isolated LightGBM or ALS effect until ablations are run. |
+| Current V1.5 candidate probe | Observed candidate_recall@50 | 0.1667 | Visible top-50 coverage improved slightly but is still low. | Retrieval depth is still the next bottleneck. |
+| V1.5 ML / recall prototype | LightGBM + ALS artifacts | `build/lgb_ranker_v1.txt`, `build/faiss_index.bin`, ALS embedding maps | The repo contains prototype learning-to-rank and collaborative recall assets. | Report as V1.5 evidence; isolate arms before making a strong model claim. |
+
 ## Search Carryover Gain@K
 
 **Definition** - for each `search_query` event $E_s$ whose `query_key` resolves to a
@@ -142,6 +156,7 @@ $env:ZHIHUREC_DATABASE_URL = 'mysql+pymysql://root:root@localhost:3306/zhihurec_
 | Date       | K  | Train ratio | Recall@K | NDCG@K | Test clicks | candidate_recall@50 | Notes |
 |------------|----|-------------|----------|--------|-------------|---------------------|-------|
 | 2026-05-16 | 10 | 0.8         | 0.0000   | 0.0000 | 19          | 0.1579              | First baseline: 0/19 of test-period clicked answers appear in the warmed-profile top-10; 3/19 (15.79%) appear in top-50. Train slice posted 97 events (61 rec_click / 15 search / 21 s-click). System surfaces topic-aligned items (carryover@10 = 1.0) but does not yet predict the specific next-clicked `answer_id`; the next hop is to lift retrieval depth, not ranking weights. |
+| 2026-05-17 | 10 | 0.8         | 0.0833   | 0.0315 | 60          | 0.1667              | V1.5 live rerun against the running MySQL backend with LightGBM and ALS artifacts present. Train slice posted 258 events (101 rec_click / 55 search / 102 search-result click), request_failures = 0, and 5/60 test clicks landed in top-10. Treat this as promising prototype evidence, not an isolated model ablation. |
 
 ## Interpretation
 

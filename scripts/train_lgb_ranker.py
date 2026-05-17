@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -19,14 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import lightgbm as lgb  # noqa: E402
+
 from backend.app.config import get_settings  # noqa: E402
-from backend.app.repositories.connection import (  # noqa: E402
-    connect,
-    parse_database_url,
-)
-from backend.app.repositories.training_data import (  # noqa: E402
-    extract_training_samples,
-)
+from backend.app.repositories.connection import connect, parse_database_url  # noqa: E402
+from backend.app.repositories.training_data import extract_training_samples  # noqa: E402
 
 BUILD_DIR = ROOT / "build"
 

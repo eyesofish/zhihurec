@@ -141,7 +141,7 @@ This starts MySQL, the backend on 8000, the debug frontend on 5173, and the prod
 3. **Search** — type in the top search box, select a suggestion, or press Enter. Results page shows keyword-matched answers.
 4. **Post detail** — click a card title to see the full answer card with back-to-feed navigation.
 5. **Upvote** — click the up arrow on any card. The event is tracked and profile weights update (visible in the right-rail Profile Debug panel).
-6. **Profile debug** — the right rail shows behavior score, cold-start seed, topic weights, and recent clicks from `/debug/profile`.
+6. **Profile debug + D3 chart** — the right rail shows behavior score, cold-start seed, a D3 topic-weight bar chart, numeric topic weights, and recent clicks from `/debug/profile`. Search, click, and upvote events trigger profile refreshes, so the chart is the main visual proof that the profile is changing.
 
 The debug frontend at `http://127.0.0.1:5173` remains available and unaffected.
 

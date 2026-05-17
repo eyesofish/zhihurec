@@ -7,15 +7,25 @@ interface Props {
   item: FeedItem | SearchItem;
   userId: number;
   requestId?: string;
+  surface?: string;
   showReason?: boolean;
   onTrackClick?: () => void;
+  onProfileChanged?: () => void;
 }
 
 function isFeedItem(item: FeedItem | SearchItem): item is FeedItem {
   return "selected_reason" in item;
 }
 
-export default function PostCard({ item, userId, requestId, showReason, onTrackClick }: Props) {
+export default function PostCard({
+  item,
+  userId,
+  requestId,
+  surface = "feed",
+  showReason,
+  onTrackClick,
+  onProfileChanged,
+}: Props) {
   const mainTopic = item.topics?.[0];
   const communityName = mainTopic ? `r/topic-${mainTopic.topic_id}` : "r/zhihurec";
 
@@ -25,7 +35,8 @@ export default function PostCard({ item, userId, requestId, showReason, onTrackC
         answerId={item.answer_id}
         userId={userId}
         requestId={requestId}
-        onVoted={onTrackClick}
+        surface={surface}
+        onVoted={onProfileChanged}
       />
 
       <div className="zr-card__body">

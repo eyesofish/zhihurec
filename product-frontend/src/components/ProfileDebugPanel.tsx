@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getDebugProfile } from "../api/client";
 import type { DebugProfileResponse } from "../api/types";
+import TopicWeightChart from "./TopicWeightChart";
 
 interface Props {
   userId: number;
@@ -55,11 +56,16 @@ export default function ProfileDebugPanel({ userId, refreshTick }: Props) {
         <span>Cold start</span>
         <span>{data.cold_start_seed_key}</span>
       </div>
+      <div className="zr-profile-debug__row zr-profile-debug__row--muted">
+        <span>Vector keys</span>
+        <span>{data.vector_summary?.vector_key_count ?? sortedWeights.length}</span>
+      </div>
 
       <div style={{ marginTop: 8 }}>
         <div className="zr-profile-debug__row zr-profile-debug__row--muted" style={{ fontWeight: 600 }}>
           <span>Topic Weights</span>
         </div>
+        <TopicWeightChart topicWeights={sortedWeights} />
         {sortedWeights.slice(0, 8).map((tw) => (
           <div key={tw.topic_id} className="zr-profile-debug__row">
             <span>Topic {tw.topic_id}</span>

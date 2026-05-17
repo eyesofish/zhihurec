@@ -15,17 +15,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import numpy as np
+import numpy as np  # noqa: E402
 
-from backend.app.config import get_settings
-from backend.app.repositories.connection import connect, parse_database_url
+from backend.app.config import get_settings  # noqa: E402
+from backend.app.repositories.connection import connect, parse_database_url  # noqa: E402
 
 BUILD_DIR = ROOT / "build"
 

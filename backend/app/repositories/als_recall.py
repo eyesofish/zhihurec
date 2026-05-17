@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -33,7 +32,7 @@ class ALSRecall:
         if not self._index_path.exists():
             return  # not trained yet — all calls become no-ops
 
-        import faiss
+        import faiss  # type: ignore[import-untyped]
 
         self._index = faiss.read_index(str(self._index_path))
         self._user_embeddings = np.load(str(self._user_emb_path))
@@ -66,7 +65,7 @@ class ALSRecall:
         distances, indices = self._index.search(user_vec, k)
 
         results: list[tuple[int, float]] = []
-        for dist, idx in zip(distances[0], indices[0]):
+        for dist, idx in zip(distances[0], indices[0], strict=False):
             if idx == -1:
                 continue
             answer_id = self._index_to_item.get(int(idx))

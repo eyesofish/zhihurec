@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
 from backend.app.config import Settings, compute_alpha
 from backend.app.repositories._utils import (
@@ -12,6 +12,7 @@ from backend.app.repositories._utils import (
     selected_reason,
     topic_delta_models,
 )
+from backend.app.repositories.als_recall import get_als_recall
 from backend.app.repositories.base import RuntimeRepository
 from backend.app.repositories.connection import connect, parse_database_url
 from backend.app.repositories.content_dao import (
@@ -38,7 +39,6 @@ from backend.app.repositories.profile_dao import (
     profile_from_row,
 )
 from backend.app.repositories.ranker import build_feature_dict, score_candidates
-from backend.app.repositories.als_recall import get_als_recall
 from backend.app.schemas.answer import AnswerCardResponse
 from backend.app.schemas.common import AuthorCard, TopicCard
 from backend.app.schemas.event import (
@@ -179,6 +179,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
             # ── build FeedItem list ────────────────────────────────────
             scored_items: list[tuple[FeedItem, RecallCandidateDebug]] = []
             for idx, (answer_id, row, topics, topic_ids, base_score, sources, is_fallback) in enumerate(candidate_keys):
+                row = cast(dict[str, Any], row)
                 personalized_topic_score = round(
                     sum(topic_weight_map.get(tid, 0.0) for tid in topic_ids), 6
                 )
@@ -212,7 +213,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     topics=topics,
                     selected_reason=selected_reason(
                         is_fallback=is_fallback,
-                        sources=sources,
+                        sources=set(sources),
                     ),
                     scores=FeedItemScores(
                         base_recall_score=base_score,

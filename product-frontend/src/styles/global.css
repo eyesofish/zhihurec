@@ -547,6 +547,55 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.zr-topic-chart {
+  width: 100%;
+  min-height: 178px;
+  margin: 6px 0 8px;
+  overflow: hidden;
+}
+
+.zr-topic-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.zr-topic-chart__axis text {
+  fill: var(--zr-text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.zr-topic-chart__axis line {
+  stroke: var(--zr-border-strong);
+}
+
+.zr-topic-chart__bar-bg {
+  fill: #ffffff;
+  stroke: var(--zr-border);
+}
+
+.zr-topic-chart__bar {
+  fill: var(--zr-orange);
+}
+
+.zr-topic-chart__value {
+  fill: var(--zr-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.zr-topic-chart__empty {
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px dashed var(--zr-border-strong);
+  border-radius: 6px;
+  color: var(--zr-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .zr-post-detail {
   padding: 18px;
   background: #fff;

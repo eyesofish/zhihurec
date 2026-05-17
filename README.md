@@ -14,6 +14,22 @@ Headline result: **Search Carryover Gain@10 = +0.1000** on 121 replay events (ba
 
 This brings up a dockerised MySQL, applies schema + demo seed, resets the demo user, runs the smoke pipeline against `/healthz`, `/debug/profile`, `/feed?debug=true`, and the static frontend, then stops cleanly. Full step-by-step manual flow: `docs/v1_local_runbook.md`.
 
+## ECS273 demo path
+
+Use this path for the implementation submission and live demo:
+
+```powershell
+# Fast non-interactive check
+.\scripts\init_local.ps1 -SmokeTest
+
+# Full demo with the React product frontend
+.\scripts\init_local.ps1 -ProductFrontend
+```
+
+Open `http://127.0.0.1:5174` for the product demo. The walkthrough is: choose a persona, inspect the feed, run a search from the top bar, click a search result or upvote a feed item, then watch the right-rail Profile Debug panel update. The advanced visualization is the D3 topic-weight bar chart in `product-frontend/src/components/TopicWeightChart.tsx`; it renders real `/debug/profile` data and refreshes after search, click, and upvote events.
+
+For evaluation, cite the compact summary in `docs/v1_metrics.md`: `Search Carryover Gain@10 = +0.1000`; the historical V1 item-ranking baseline was `Recall@10 = 0.0000`, `NDCG@10 = 0.0000`, and observed `candidate_recall@50 = 0.1579`; the current V1.5 live rerun with ML/collaborative artifacts present produced `Recall@10 = 0.0833`, `NDCG@10 = 0.0315`, and observed `candidate_recall@50 = 0.1667`. This supports the honest V1.5 story: search intent visibly affects topic-level feed alignment, and lightweight ML/recall prototypes are promising but still need isolated ablations before becoming the main claim.
+
 ## Where to read next
 
 | You are... | Read this |
@@ -30,7 +46,7 @@ This brings up a dockerised MySQL, applies schema + demo seed, resets the demo u
 - **Backend**: Python 3.13, FastAPI, PyMySQL (no ORM)
 - **Storage**: MySQL 8.0 (via `docker compose`, the only online source of truth)
 - **Frontend (debug)**: vanilla HTML/CSS/JS served by `python -m http.server` on port 5173
-- **Frontend (product)**: React 18 + TypeScript 5.6 + Vite 5.4 on port 5174 — Reddit-inspired product demo (`product-frontend/`)
+- **Frontend (product)**: React 18 + TypeScript 5.6 + Vite 5.4 + D3.js on port 5174 - Reddit-inspired product demo (`product-frontend/`)
 - **Offline tooling**: `scripts/build_demo_world.py`, `scripts/replay_demo_events.py`, `scripts/eval_replay_metrics.py`, `scripts/eda.py`
 
 ## Non-goals (by design — see `plan/project_brief_zh.md` §14)

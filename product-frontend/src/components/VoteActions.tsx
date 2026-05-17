@@ -5,15 +5,16 @@ interface Props {
   answerId: number;
   userId: number;
   requestId?: string;
+  surface?: string;
   onVoted?: () => void;
 }
 
-export default function VoteActions({ answerId, userId, requestId, onVoted }: Props) {
+export default function VoteActions({ answerId, userId, requestId, surface = "feed", onVoted }: Props) {
   const handleVote = (direction: "upvote" | "downvote") => {
     trackEvent({
       user_id: userId,
       event_type: direction,
-      surface: "feed",
+      surface,
       answer_id: answerId,
       request_id: requestId ?? null,
     }).then(() => onVoted?.());

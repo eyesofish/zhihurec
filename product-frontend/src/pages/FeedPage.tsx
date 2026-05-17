@@ -99,6 +99,7 @@ export default function FeedPage() {
           requestId={requestId}
           showReason
           onTrackClick={() => handleClick(item.answer_id)}
+          onProfileChanged={bumpProfile}
         />
       ))}
     </main>

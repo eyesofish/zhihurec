@@ -24,6 +24,7 @@ export default function SearchPage() {
       .then((res) => {
         if (cancelled) return;
         setItems(res.items);
+        bumpProfile();
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -36,7 +37,7 @@ export default function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPersona, queryKey]);
+  }, [selectedPersona, queryKey, bumpProfile]);
 
   const handleClick = useCallback(
     (answerId: number) => {
@@ -84,7 +85,9 @@ export default function SearchPage() {
           key={item.answer_id}
           item={item}
           userId={selectedPersona.user_id}
+          surface="search"
           onTrackClick={() => handleClick(item.answer_id)}
+          onProfileChanged={bumpProfile}
         />
       ))}
     </main>
