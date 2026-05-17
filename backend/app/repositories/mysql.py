@@ -37,6 +37,8 @@ from backend.app.repositories.profile_dao import (
     load_recent_query_topic_scores,
     profile_from_row,
 )
+from backend.app.repositories.ranker import build_feature_dict, score_candidates
+from backend.app.repositories.als_recall import get_als_recall
 from backend.app.schemas.answer import AnswerCardResponse
 from backend.app.schemas.common import AuthorCard, TopicCard
 from backend.app.schemas.event import (
@@ -110,6 +112,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 topic_weight_map=topic_weight_map,
                 query_topic_scores=query_topic_scores,
                 page_size=page_size,
+                user_id=user_id,
             )
             if not candidates:
                 return FeedResponse(
@@ -136,34 +139,63 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 [float(row.get("hot_score") or 0) for row in answer_rows.values()] + [1.0]
             )
 
-            scored_items: list[tuple[FeedItem, RecallCandidateDebug]] = []
+            now_ts = time.time()
+            user_topic_count = len(topic_weight_map)
+
+            # ── build feature dicts for all candidates ────────────────
+            feature_dicts: list[dict[str, float]] = []
+            candidate_keys: list[tuple[int, Any, Any, set[int], float, list[str], bool]] = []
             for answer_id, candidate in candidates.items():
                 row = answer_rows.get(answer_id)
                 if row is None:
                     continue
-
                 topics = topics_by_answer.get(answer_id, [])
                 topic_ids = {topic.topic_id for topic in topics}
                 base_score = round(
                     float(row.get("hot_score") or candidate["raw_base_score"] or 0) / max_hot_score,
                     6,
+                ) if max_hot_score > 0 else 0.0
+                feat = build_feature_dict(
+                    answer_row=row,
+                    topic_ids=topic_ids,
+                    topic_weight_map=topic_weight_map,
+                    default_topic_weight_map=default_topic_weight_map,
+                    query_topic_scores=query_topic_scores,
+                    alpha=alpha,
+                    max_hot_score=max_hot_score,
+                    now_ts=now_ts,
+                    user_behavior_score=profile.behavior_score,
+                    user_topic_count=user_topic_count,
                 )
+                feature_dicts.append(feat)
+                candidate_keys.append(
+                    (answer_id, row, topics, topic_ids, base_score,
+                     sorted(candidate["sources"]), bool(candidate["is_fallback"]))
+                )
+
+            # ── batch model inference ─────────────────────────────────
+            model_scores = score_candidates(feature_dicts) if feature_dicts else None
+
+            # ── build FeedItem list ────────────────────────────────────
+            scored_items: list[tuple[FeedItem, RecallCandidateDebug]] = []
+            for idx, (answer_id, row, topics, topic_ids, base_score, sources, is_fallback) in enumerate(candidate_keys):
                 personalized_topic_score = round(
-                    sum(topic_weight_map.get(topic_id, 0.0) for topic_id in topic_ids), 6
+                    sum(topic_weight_map.get(tid, 0.0) for tid in topic_ids), 6
                 )
                 default_topic_score = round(
-                    sum(default_topic_weight_map.get(topic_id, 0.0) for topic_id in topic_ids), 6
+                    sum(default_topic_weight_map.get(tid, 0.0) for tid in topic_ids), 6
                 )
                 topic_match_score = round(
-                    alpha * personalized_topic_score + (1.0 - alpha) * default_topic_score,
-                    6,
+                    alpha * personalized_topic_score + (1.0 - alpha) * default_topic_score, 6
                 )
                 query_recall_boost = round(
-                    sum(query_topic_scores.get(topic_id, 0.0) for topic_id in topic_ids), 6
+                    sum(query_topic_scores.get(tid, 0.0) for tid in topic_ids), 6
                 )
-                final_score = round(base_score + topic_match_score + query_recall_boost, 6)
-                sources = sorted(candidate["sources"])
-                is_fallback = bool(candidate["is_fallback"])
+                if model_scores is not None and idx < len(model_scores):
+                    final_score = round(float(model_scores[idx]), 6)
+                else:
+                    # fallback: manual formula when model not trained yet
+                    final_score = round(base_score + topic_match_score + query_recall_boost, 6)
 
                 item = FeedItem(
                     answer_id=answer_id,
@@ -180,7 +212,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     topics=topics,
                     selected_reason=selected_reason(
                         is_fallback=is_fallback,
-                        sources=candidate["sources"],
+                        sources=sources,
                     ),
                     scores=FeedItemScores(
                         base_recall_score=base_score,
@@ -664,6 +696,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
         topic_weight_map: dict[int, float],
         query_topic_scores: dict[int, float],
         page_size: int,
+        user_id: int,
     ) -> dict[int, dict[str, Any]]:
         candidates: dict[int, dict[str, Any]] = {}
         profile_topic_ids = list(topic_weight_map)[:10]
@@ -687,6 +720,21 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 is_fallback=False,
                 raw_base_score=float(row.get("hot_score") or 0.0),
             )
+
+        # ── ALS collaborative filtering recall (4th channel) ───────
+        if self._settings.als_recall_enabled:
+            als = get_als_recall()
+            for answer_id, sim_score in als.get_candidates(
+                user_id=user_id,
+                k=self._settings.als_recall_top_k,
+            ):
+                add_feed_candidate(
+                    candidates,
+                    answer_id=answer_id,
+                    source="als_cf",
+                    is_fallback=False,
+                    raw_base_score=float(sim_score),
+                )
 
         non_fallback_count = sum(
             1 for candidate in candidates.values() if not candidate["is_fallback"]

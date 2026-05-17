@@ -24,6 +24,15 @@ def create_app() -> FastAPI:
         version=settings.app_version,
         summary="ZhihuRec V1 backend skeleton",
     )
+
+    @app.on_event("startup")
+    async def _preload_ranker() -> None:
+        try:
+            from backend.app.repositories.ranker import load_model
+            load_model()
+        except FileNotFoundError:
+            pass  # model not trained yet — fall back to manual scoring
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),

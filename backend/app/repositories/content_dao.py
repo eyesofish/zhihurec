@@ -62,8 +62,19 @@ def load_answer_rows(connection: Any, answer_ids: list[int]) -> dict[int, dict[s
               a.author_id,
               a.display_summary AS answer_summary,
               a.hot_score,
+              a.click_count,
+              a.impression_count,
+              a.has_picture,
+              a.has_video,
+              a.is_high_value,
+              a.is_editor_recommended,
+              a.create_ts,
+              a.likes_count,
+              a.collection_count,
               q.display_title AS question_title,
-              au.display_name AS author_name
+              au.display_name AS author_name,
+              au.is_excellent_answerer,
+              au.follower_count AS author_follower_count
             FROM answer a
             LEFT JOIN question q ON q.question_id = a.question_id
             LEFT JOIN author au ON au.author_id = a.author_id

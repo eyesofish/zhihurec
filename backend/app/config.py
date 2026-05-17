@@ -23,6 +23,8 @@ class Settings:
     cold_start_alpha_ceiling: float = 0.95
     cold_start_behavior_score_scale: float = 30.0
     cold_start_default_seed_key: str = "cold_start_default"
+    als_recall_top_k: int = 200
+    als_recall_enabled: bool = True
     cors_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -75,6 +77,8 @@ def get_settings() -> Settings:
         cold_start_default_seed_key=os.getenv(
             "ZHIHUREC_COLD_START_DEFAULT_SEED_KEY", "cold_start_default"
         ),
+        als_recall_top_k=int(os.getenv("ZHIHUREC_ALS_RECALL_TOP_K", "200")),
+        als_recall_enabled=os.getenv("ZHIHUREC_ALS_RECALL_ENABLED", "1").lower() in ("1", "true", "yes"),
         cors_origins=tuple(
             origin.strip()
             for origin in os.getenv(
