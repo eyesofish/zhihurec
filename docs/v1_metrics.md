@@ -82,3 +82,73 @@ and `carryover_gain_at_k`.
 - Since B1, `demo_event_replay.jsonl` contains `recommendation_click`, `search_query`,
   and `search_result_click` events. The Carryover Gain@K calculation still evaluates
   only `search_query` moments, while replaying all event types into the live profile.
+
+## Item-Ranking Recall@K and NDCG@K
+
+**Definition** - sort the demo user's replay events by `event_ts` and split
+80/20 by cumulative count. POST every train event to the live backend so the
+profile reaches its train-period state. Take a single `/feed?page_size=K`
+snapshot at the boundary; this ordered list of `answer_id`s is the
+prediction. For each test event $e_i$ that carries an `answer_id` $a_i$:
+
+$$
+\mathrm{hit}_i = \mathbb{1}[a_i \in F_K], \qquad
+\mathrm{Recall@}K_i = \mathrm{hit}_i, \qquad
+\mathrm{NDCG@}K_i = \begin{cases} 1/\log_2(\mathrm{rank}_i + 1) & \mathrm{hit}_i = 1 \\ 0 & \mathrm{otherwise} \end{cases}
+$$
+
+with $\mathrm{rank}_i$ 1-indexed. Aggregate as means across all scored test
+clicks. Implementation: `backend/app/evaluate.py` (`time_split`, `recall_at_k`,
+`ndcg_at_k`); driver: `scripts/eval_offline_metrics.py`.
+
+**Why this is the system-level baseline** - Carryover Gain@K probes one
+specific cross-surface signal (search reshapes feed). Recall@K / NDCG@K asks
+the blunter question: does the unconditioned top-K feed predict the user's
+next click at all? Every future ranking change should report
+$\Delta$Recall@10 and $\Delta$NDCG@10 against the baseline below.
+
+**Caveats**
+
+- *Single-snapshot, not leave-one-out*: every test click is scored against
+  the same top-K computed at `split_ts`, not a per-event live top-K. This is
+  a fast, conservative baseline; leave-one-out per click is the documented
+  upgrade path.
+- *Single-user demo*: the demo world has one active user (7248). These are
+  per-event item-ranking metrics, not cross-user collaborative-filtering
+  numbers. Multi-user metrics require a different demo seed and are out of
+  scope here.
+- *Candidate ceiling*: `candidate_recall_at_k_observed` is reported with
+  `--candidate-k 50` (default; capped by `/feed?page_size <= 50` in
+  `backend/app/routers/feed.py:15`). It is **not** a true candidate-pool
+  recall (the internal pool is ~1000 items) - it's "of the top 50 ranked
+  items, how many test clicks are present?" Still useful: if Recall@10 is
+  low while Recall@50 is high, the ranker is the bottleneck; if both are
+  low, retrieval depth is the ceiling.
+
+**Run**
+
+```powershell
+docker compose up -d
+$env:ZHIHUREC_DATABASE_URL = 'mysql+pymysql://root:root@localhost:3306/zhihurec_demo'
+& 'C:\ProgramData\anaconda3\python.exe' scripts\apply_demo_mysql.py
+# in a second window:
+& 'C:\ProgramData\anaconda3\python.exe' -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+# then back in the first window (the script will call reset_demo_user.py itself):
+& 'C:\ProgramData\anaconda3\python.exe' scripts\eval_offline_metrics.py --k 10 --train-ratio 0.8
+```
+
+## Historical baselines (Recall@K / NDCG@K)
+
+| Date       | K  | Train ratio | Recall@K | NDCG@K | Test clicks | candidate_recall@50 | Notes |
+|------------|----|-------------|----------|--------|-------------|---------------------|-------|
+| 2026-05-16 | 10 | 0.8         | 0.0000   | 0.0000 | 19          | 0.1579              | First baseline: 0/19 of test-period clicked answers appear in the warmed-profile top-10; 3/19 (15.79%) appear in top-50. Train slice posted 97 events (61 rec_click / 15 search / 21 s-click). System surfaces topic-aligned items (carryover@10 = 1.0) but does not yet predict the specific next-clicked `answer_id`; the next hop is to lift retrieval depth, not ranking weights. |
+
+## Interpretation
+
+- `recall@10 >= 0.30` - feed strongly predicts the next click; quotable.
+- `0.10 <= recall@10 < 0.30` - signal present, room to grow.
+- `recall@10 < 0.10` and `candidate_recall@50 >= 0.30` - the ranker is the
+  bottleneck (the answer is in the top 50 but not in the top 10).
+- `recall@10 < 0.10` and `candidate_recall@50 < 0.10` - retrieval depth is
+  the ceiling (the answer is not even in the top 50, so topic-based
+  candidate retrieval needs lifting first).
