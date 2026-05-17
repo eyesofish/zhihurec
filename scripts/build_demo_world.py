@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import random
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -59,7 +60,13 @@ def parse_args() -> argparse.Namespace:
         help="Directory where derived bridge artifacts will be written.",
     )
     parser.add_argument(
-        "--demo-user-id", type=int, default=None, help="Force a specific demo user ID."
+        "--demo-user-id", type=int, default=None, help="Force a specific demo user ID (becomes the first persona)."
+    )
+    parser.add_argument(
+        "--demo-persona-count",
+        type=int,
+        default=3,
+        help="Number of demo personas to select. The forced demo-user-id, when provided, occupies slot 1.",
     )
     parser.add_argument(
         "--max-answers",
@@ -121,6 +128,12 @@ def parse_args() -> argparse.Namespace:
         default=14400,
         help="Heuristic window for classifying a click as search-result click. Default 14400s (4h) reflects the sparse demo activity: queries and follow-up clicks tend to fall in the same evening; 300s caught zero clicks on the current demo user.",
     )
+    parser.add_argument(
+        "--content-dir",
+        type=Path,
+        default=None,
+        help="Directory with topic_labels.json, query_labels.json for semantic overlay. Auto-detected from scripts/demo_content/ if not set.",
+    )
     return parser.parse_args()
 
 
@@ -161,7 +174,242 @@ def synthetic_name(prefix: str, numeric_id: int) -> str:
     return f"{prefix} {numeric_id}"
 
 
-def load_topics(path: Path) -> Dict[int, dict]:
+# ---------------------------------------------------------------------------
+# Semantic content overlay — optional Chinese display text for the demo world.
+# ---------------------------------------------------------------------------
+
+# Templates are embedded here to avoid cross-directory import issues.
+_QUESTION_TEMPLATES: Dict[str, list[str]] = {
+    "Food": [
+        "What's your take on {display_name}?",
+        "Best {topic_name} spots you've tried?",
+        "{topic_name} lovers — share your top picks",
+        "Why is {topic_name} getting so popular lately?",
+        "How many ways have you tried {topic_name}?",
+    ],
+    "Technology": [
+        "{topic_name} latest developments — a deep dive",
+        "The future of {topic_name}: trends and predictions",
+        "How {topic_name} is being applied in industry",
+        "What do you think about the {topic_name} breakthrough?",
+        "Essential reads on {topic_name}",
+    ],
+    "Education": [
+        "{topic_name} tips that actually helped me",
+        "Thoughts and advice on {topic_name}",
+        "{topic_name}: from beginner to proficient",
+        "How {topic_name} changed my perspective",
+        "Useful resources for {topic_name}",
+    ],
+    "Finance": [
+        "{topic_name} strategy — an in-depth breakdown",
+        "The market outlook for {topic_name}",
+        "What's the real logic behind {topic_name}?",
+        "My personal take on {topic_name}",
+        "Getting started with {topic_name}: a quick guide",
+    ],
+    "Gaming": [
+        "{topic_name} in-depth review and impressions",
+        "Tips and tricks for {topic_name}",
+        "My honest thoughts after playing {topic_name}",
+        "{topic_name} beginner's guide",
+        "Why you should give {topic_name} a try",
+    ],
+    "Entertainment": [
+        "Recommendation: a {topic_name}-related gem",
+        "Brilliant details in {topic_name} worth discussing",
+        "Personal reflections on {topic_name}",
+        "What makes {topic_name} so compelling?",
+        "Anything similar to {topic_name} to recommend?",
+    ],
+    "Sports": [
+        "{topic_name} — match analysis and thoughts",
+        "Latest updates on {topic_name}",
+        "Deep dive into {topic_name}",
+        "{topic_name} fans, what are your takes?",
+        "Insights on {topic_name}",
+    ],
+    "Travel": [
+        "Recommend a great spot for {topic_name}",
+        "{topic_name} travel guide and tips",
+        "My {topic_name} travel experience",
+        "Practical advice for {topic_name}",
+        "What's it like to really explore {topic_name}?",
+    ],
+    "Career": [
+        "My experience with {topic_name}",
+        "Some thoughts on {topic_name}",
+        "What I learned about {topic_name}",
+        "Let's talk about {topic_name}",
+        "How {topic_name} shapes career growth",
+    ],
+    "Music": [
+        "{topic_name} picks and appreciation",
+        "Discussing music from {topic_name}",
+        "Fans of {topic_name} — let's share",
+        "How {topic_name} influenced me",
+        "Recommend some {topic_name}-style tracks",
+    ],
+    "Health": [
+        "{topic_name} — my experience and tips",
+        "Practical advice for {topic_name}",
+        "Effective approaches to {topic_name}",
+        "Let's discuss {topic_name}",
+        "Real stories about {topic_name}",
+    ],
+}
+
+_DEFAULT_QUESTION_TEMPLATES = [
+    "Hot discussion about {display_name}",
+    "Sharing and discussing {display_name}",
+    "Let's talk about {display_name}",
+    "Experience sharing about {display_name}",
+    "What does everyone think about {display_name}?",
+]
+
+_ANSWER_TEMPLATES: Dict[str, list[str]] = {
+    "Food": [
+        "A well-reviewed {topic_name} spot — great atmosphere, authentic flavors, definitely worth trying.",
+        "Detailed experience sharing about {topic_name}, from dishes to service — all on point.",
+        "As a {topic_name} enthusiast, here are my top value-for-money recommendations.",
+        "Checked out this {topic_name} place over the weekend — exceeded expectations.",
+        "Some {topic_name} tips to help you avoid common pitfalls.",
+    ],
+    "Technology": [
+        "An in-depth technical analysis of {topic_name}, suitable for readers with some background.",
+        "Latest developments and future directions in the {topic_name} space.",
+        "A practical look at the real-world applications of {topic_name}.",
+        "A detailed beginner's tutorial on {topic_name} — approachable and clear.",
+        "{topic_name} in practice: industry adoption and reflections.",
+    ],
+    "Education": [
+        "A curated learning path for {topic_name} that helped me get started.",
+        "Study tips and resource recommendations for {topic_name} exams.",
+        "Sharing my personal experience and methodology with {topic_name}.",
+        "Some high-quality resources and courses for {topic_name}.",
+        "How {topic_name} contributed to my personal growth and perspective.",
+    ],
+    "Finance": [
+        "Market analysis and investment logic behind {topic_name}.",
+        "A data-driven look at the long-term value of {topic_name}.",
+        "My key judgments and reasoning on {topic_name}.",
+        "Key metrics and watchpoints for {topic_name}, organized and explained.",
+        "A macro-level analysis of {topic_name} trends and opportunities.",
+    ],
+    "Gaming": [
+        "Detailed review of {topic_name}, from visuals to gameplay mechanics.",
+        "Honest impressions after playing {topic_name} — clear pros and cons.",
+        "Highly recommend {topic_name} if you enjoy this genre — here's why.",
+        "{topic_name} gameplay experience, with some tips and strategies.",
+        "Discussing the game design and player community of {topic_name}.",
+    ],
+    "Entertainment": [
+        "This {topic_name}-related work comes highly recommended — here's why.",
+        "A detailed breakdown of several key moments in {topic_name}.",
+        "Looking at the creative approach of this work through the lens of {topic_name}.",
+        "Recommendations for great {topic_name}-style titles.",
+        "How {topic_name} is portrayed and its impact in media.",
+    ],
+}
+
+_DEFAULT_ANSWER_TEMPLATES = [
+    "A high-quality response about {display_name} — detailed, well-structured, and insightful.",
+    "This answer analyzes {display_name} from multiple angles — worth a read.",
+    "A practical in-depth look at {display_name}, carefully curated and summarized.",
+    "A community-selected answer about {display_name}.",
+    "A deep discussion about {display_name}, with clear and well-reasoned arguments.",
+]
+
+_PERSONA_NAMES = ["Alex", "Jordan", "Casey"]
+
+
+def _resolve_content_dir(args: argparse.Namespace) -> Path | None:
+    """Resolve the content overlay directory from CLI arg or auto-detect."""
+    if args.content_dir is not None:
+        return args.content_dir
+    candidate = Path(__file__).resolve().parent / "demo_content"
+    if candidate.is_dir():
+        return candidate
+    return None
+
+
+def _load_topic_labels(content_dir: Path | None) -> Dict[int, dict]:
+    if content_dir is None:
+        return {}
+    path = content_dir / "topic_labels.json"
+    if not path.exists():
+        print(f"[content] topic_labels.json not found at {path} — using synthetic fallback")
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    labels = {int(k): v for k, v in raw.items()}
+    print(f"[content] loaded topic_labels={len(labels)}")
+    return labels
+
+
+def _load_query_labels(content_dir: Path | None) -> Dict[str, str]:
+    if content_dir is None:
+        return {}
+    path = content_dir / "query_labels.json"
+    if not path.exists():
+        return {}
+    labels = json.loads(path.read_text(encoding="utf-8"))
+    print(f"[content] loaded query_labels={len(labels)}")
+    return labels
+
+
+def _topic_display_name(topic_id: int, topic_labels: Dict[int, dict]) -> str:
+    info = topic_labels.get(topic_id)
+    if info:
+        return info["display_name"]
+    return synthetic_name("Topic", topic_id)
+
+
+def _topic_category(topic_id: int, topic_labels: Dict[int, dict]) -> str:
+    info = topic_labels.get(topic_id)
+    if info:
+        return info["category"]
+    return "General"
+
+
+def _make_question_title(topic_ids: list[int], question_id: int, topic_labels: Dict[int, dict]) -> str:
+    if not topic_ids or not topic_labels:
+        return synthetic_name("Question", question_id)
+    primary_topic = topic_ids[0]
+    category = _topic_category(primary_topic, topic_labels)
+    display_name = _topic_display_name(primary_topic, topic_labels)
+    templates = _QUESTION_TEMPLATES.get(category, _DEFAULT_QUESTION_TEMPLATES)
+    rng = random.Random(42 + question_id)
+    template = rng.choice(templates)
+    return template.format(display_name=display_name, topic_name=display_name)
+
+
+def _make_answer_summary(topic_ids: list[int], answer_id: int, topic_labels: Dict[int, dict]) -> str:
+    if not topic_ids or not topic_labels:
+        return f"Synthetic answer summary for answer {answer_id}."
+    primary_topic = topic_ids[0]
+    category = _topic_category(primary_topic, topic_labels)
+    display_name = _topic_display_name(primary_topic, topic_labels)
+    templates = _ANSWER_TEMPLATES.get(category, _DEFAULT_ANSWER_TEMPLATES)
+    rng = random.Random(137 + answer_id)
+    template = rng.choice(templates)
+    return template.format(display_name=display_name, topic_name=display_name)
+
+
+def _query_display_label(query_key: str, query_labels: Dict[str, str]) -> str:
+    label = query_labels.get(query_key)
+    if label:
+        return label
+    return f"Query {query_key}"
+
+
+def _persona_display_name(slot: int, user_id: int) -> str:
+    idx = min(slot, len(_PERSONA_NAMES)) - 1
+    return _PERSONA_NAMES[idx] if idx >= 0 else synthetic_name("User", user_id)
+
+
+def load_topics(path: Path, topic_labels: Dict[int, dict] | None = None) -> Dict[int, dict]:
+    if topic_labels is None:
+        topic_labels = {}
     topics: Dict[int, dict] = {}
     for row in iter_rows(path):
         if not row:
@@ -169,7 +417,7 @@ def load_topics(path: Path) -> Dict[int, dict]:
         topic_id = int(row[0])
         topics[topic_id] = {
             "topic_id": topic_id,
-            "display_name": synthetic_name("Topic", topic_id),
+            "display_name": _topic_display_name(topic_id, topic_labels),
             "answer_count": 0,
             "question_count": 0,
             "source": "zhihurec_1m",
@@ -225,7 +473,9 @@ def load_users(path: Path) -> Dict[int, dict]:
     return users
 
 
-def load_questions(path: Path, topics: Dict[int, dict]) -> Tuple[Dict[int, dict], List[dict]]:
+def load_questions(path: Path, topics: Dict[int, dict], topic_labels: Dict[int, dict] | None = None) -> Tuple[Dict[int, dict], List[dict]]:
+    if topic_labels is None:
+        topic_labels = {}
     questions: Dict[int, dict] = {}
     question_topic_rows: List[dict] = []
     for row in iter_rows(path):
@@ -243,7 +493,7 @@ def load_questions(path: Path, topics: Dict[int, dict]) -> Tuple[Dict[int, dict]
             "comment_count": as_int(row[5]),
             "token_ids": token_ids,
             "topic_ids": topic_ids,
-            "display_title": synthetic_name("Question", question_id),
+            "display_title": _make_question_title(topic_ids, question_id, topic_labels),
             "source": "zhihurec_1m",
         }
         for index, topic_id in enumerate(topic_ids):
@@ -260,7 +510,9 @@ def load_questions(path: Path, topics: Dict[int, dict]) -> Tuple[Dict[int, dict]
     return questions, question_topic_rows
 
 
-def load_answers(path: Path, topics: Dict[int, dict]) -> Tuple[Dict[int, dict], List[dict]]:
+def load_answers(path: Path, topics: Dict[int, dict], topic_labels: Dict[int, dict] | None = None) -> Tuple[Dict[int, dict], List[dict]]:
+    if topic_labels is None:
+        topic_labels = {}
     answers: Dict[int, dict] = {}
     answer_topic_rows: List[dict] = []
     for row in iter_rows(path):
@@ -290,7 +542,7 @@ def load_answers(path: Path, topics: Dict[int, dict]) -> Tuple[Dict[int, dict], 
             "helpless_count": as_int(row[15]),
             "token_ids": token_ids,
             "topic_ids": topic_ids,
-            "display_summary": f"Synthetic answer summary for answer {answer_id}.",
+            "display_summary": _make_answer_summary(topic_ids, answer_id, topic_labels),
             "vector_key": f"answer:{answer_id}",
             "source": "zhihurec_1m",
         }
@@ -351,12 +603,42 @@ def collect_queries(
     return queries_by_user, query_freq
 
 
+def _candidate_score(
+    user_id: int,
+    users: Dict[int, dict],
+    user_clicks: Dict[int, List[Tuple[int, int]]],
+    queries_by_user: Dict[int, List[Tuple[int, str, List[int]]]],
+) -> Tuple[int, int, int, int]:
+    click_count = len(user_clicks.get(user_id, []))
+    query_count = len(queries_by_user.get(user_id, []))
+    followed_count = len(users.get(user_id, {}).get("followed_topic_ids", []))
+    both = 1 if click_count > 0 and query_count > 0 else 0
+    return (both, query_count * 10 + click_count, followed_count, -user_id)
+
+
+def _quick_user_topic_set(
+    user_id: int,
+    user_clicks: Dict[int, List[Tuple[int, int]]],
+    answers: Dict[int, dict],
+    top_k: int = 5,
+) -> set[int]:
+    counter: Counter = Counter()
+    for _, answer_id in user_clicks.get(user_id, []):
+        answer = answers.get(answer_id)
+        if not answer:
+            continue
+        for index, topic_id in enumerate(answer["topic_ids"]):
+            counter[topic_id] += max(1, 3 - index)
+    return {topic_id for topic_id, _ in counter.most_common(top_k)}
+
+
 def choose_demo_user(
     forced_user_id: int | None,
     users: Dict[int, dict],
     user_clicks: Dict[int, List[Tuple[int, int]]],
     queries_by_user: Dict[int, List[Tuple[int, str, List[int]]]],
 ) -> int:
+    """Legacy single-persona selector kept for back-compat with older callers."""
     if forced_user_id is not None:
         if forced_user_id not in users:
             raise KeyError(f"Forced demo user {forced_user_id} is not present in info_user.csv.")
@@ -366,14 +648,10 @@ def choose_demo_user(
     if not candidate_ids:
         raise RuntimeError("Could not identify any user with clicks or queries.")
 
-    def score(user_id: int) -> Tuple[int, int, int, int]:
-        click_count = len(user_clicks.get(user_id, []))
-        query_count = len(queries_by_user.get(user_id, []))
-        followed_count = len(users.get(user_id, {}).get("followed_topic_ids", []))
-        both = 1 if click_count > 0 and query_count > 0 else 0
-        return (both, query_count * 10 + click_count, followed_count, -user_id)
-
-    demo_user_id = max(candidate_ids, key=score)
+    demo_user_id = max(
+        candidate_ids,
+        key=lambda uid: _candidate_score(uid, users, user_clicks, queries_by_user),
+    )
     print(
         "[select] demo_user_id={} clicks={} queries={}".format(
             demo_user_id,
@@ -382,6 +660,78 @@ def choose_demo_user(
         )
     )
     return demo_user_id
+
+
+def choose_demo_personas(
+    forced_user_id: int | None,
+    count: int,
+    users: Dict[int, dict],
+    user_clicks: Dict[int, List[Tuple[int, int]]],
+    queries_by_user: Dict[int, List[Tuple[int, str, List[int]]]],
+    answers: Dict[int, dict],
+) -> List[int]:
+    """Select up to `count` demo personas, preferring users with both signal types and diverse top topics.
+
+    The forced demo-user-id, when provided, always occupies slot 1. Remaining slots are filled
+    greedily from the score-sorted candidate list, with a diversity filter that progressively
+    relaxes its top-topic overlap threshold so we always return up to `count` personas when
+    the dataset has them.
+    """
+    if count < 1:
+        raise ValueError("count must be >= 1")
+
+    candidate_ids = set(user_clicks) | set(queries_by_user)
+    if not candidate_ids:
+        raise RuntimeError("Could not identify any user with clicks or queries.")
+
+    sorted_candidates: List[int] = sorted(
+        candidate_ids,
+        key=lambda uid: _candidate_score(uid, users, user_clicks, queries_by_user),
+        reverse=True,
+    )
+
+    selected: List[int] = []
+    selected_topic_sets: List[set[int]] = []
+
+    if forced_user_id is not None:
+        if forced_user_id not in users:
+            raise KeyError(f"Forced demo user {forced_user_id} is not present in info_user.csv.")
+        selected.append(forced_user_id)
+        selected_topic_sets.append(_quick_user_topic_set(forced_user_id, user_clicks, answers))
+
+    for max_overlap in range(0, count + 1):
+        if len(selected) >= count:
+            break
+        for uid in sorted_candidates:
+            if len(selected) >= count:
+                break
+            if uid in selected:
+                continue
+            topic_set = _quick_user_topic_set(uid, user_clicks, answers)
+            worst_overlap = (
+                max((len(topic_set & existing) for existing in selected_topic_sets), default=0)
+            )
+            if worst_overlap <= max_overlap:
+                selected.append(uid)
+                selected_topic_sets.append(topic_set)
+
+    for uid in sorted_candidates:
+        if len(selected) >= count:
+            break
+        if uid not in selected:
+            selected.append(uid)
+            selected_topic_sets.append(_quick_user_topic_set(uid, user_clicks, answers))
+
+    for slot, uid in enumerate(selected, start=1):
+        print(
+            "[select] persona slot={} user_id={} clicks={} queries={}".format(
+                slot,
+                uid,
+                len(user_clicks.get(uid, [])),
+                len(queries_by_user.get(uid, [])),
+            )
+        )
+    return selected
 
 
 def build_user_topic_counters(
@@ -420,7 +770,10 @@ def build_query_topic_rows(
     user_topics: Dict[int, Counter],
     queries_by_user: Dict[int, List[Tuple[int, str, List[int]]]],
     query_freq: Counter,
+    query_labels: Dict[str, str] | None = None,
 ) -> List[dict]:
+    if query_labels is None:
+        query_labels = {}
     query_topic_counter: DefaultDict[str, Counter] = defaultdict(Counter)
     query_topic_users: DefaultDict[Tuple[str, int], set] = defaultdict(set)
     query_tokens_lookup: Dict[str, List[int]] = {}
@@ -441,8 +794,11 @@ def build_query_topic_rows(
 
     selected_query_keys: List[str] = []
     seen: set[str] = set()
+    demo_user_ids = set(getattr(args, "demo_user_ids", None) or ())
+    if not demo_user_ids and args.demo_user_id is not None:
+        demo_user_ids = {args.demo_user_id}
     for user_id in queries_by_user:
-        if user_id == args.demo_user_id:
+        if user_id in demo_user_ids:
             for _, query_key, _ in sorted(
                 queries_by_user[user_id], key=lambda item: item[0], reverse=True
             ):
@@ -469,7 +825,7 @@ def build_query_topic_rows(
             rows.append(
                 {
                     "query_key": query_key,
-                    "display_query": f"Query {query_key}",
+                    "display_query": _query_display_label(query_key, query_labels),
                     "query_tokens": query_tokens_lookup.get(query_key, parse_space_ids(query_key)),
                     "topic_id": topic_id,
                     "score": round(raw_score / total, 6),
@@ -678,28 +1034,46 @@ def main() -> None:
     print(f"[start] data_dir={args.data_dir}")
     print(f"[start] output_dir={args.output_dir}")
 
-    topics = load_topics(args.data_dir / "info_topic.csv")
+    content_dir = _resolve_content_dir(args)
+    print(f"[content] content_dir={content_dir}")
+    topic_labels = _load_topic_labels(content_dir)
+    query_labels = _load_query_labels(content_dir)
+
+    topics = load_topics(args.data_dir / "info_topic.csv", topic_labels)
     authors = load_authors(args.data_dir / "info_author.csv")
     users = load_users(args.data_dir / "info_user.csv")
-    questions, question_topic_rows = load_questions(args.data_dir / "info_question.csv", topics)
-    answers, answer_topic_rows = load_answers(args.data_dir / "info_answer.csv", topics)
+    questions, question_topic_rows = load_questions(args.data_dir / "info_question.csv", topics, topic_labels)
+    answers, answer_topic_rows = load_answers(args.data_dir / "info_answer.csv", topics, topic_labels)
     answer_impressions, answer_clicks, user_clicks = collect_impressions(
         args.data_dir / "inter_impression.csv"
     )
     queries_by_user, query_freq = collect_queries(args.data_dir / "inter_query.csv")
 
-    demo_user_id = choose_demo_user(args.demo_user_id, users, user_clicks, queries_by_user)
-    args.demo_user_id = demo_user_id
-    users[demo_user_id]["is_demo_user"] = True
+    demo_user_ids = choose_demo_personas(
+        forced_user_id=args.demo_user_id,
+        count=args.demo_persona_count,
+        users=users,
+        user_clicks=user_clicks,
+        queries_by_user=queries_by_user,
+        answers=answers,
+    )
+    args.demo_user_id = demo_user_ids[0]
+    args.demo_user_ids = list(demo_user_ids)
+    for slot, persona_id in enumerate(demo_user_ids, start=1):
+        users[persona_id]["is_demo_user"] = True
+        users[persona_id]["display_name"] = _persona_display_name(slot, persona_id)
 
     user_topics, global_topics = build_user_topic_counters(users, answers, user_clicks)
-    query_topic_rows = build_query_topic_rows(args, users, user_topics, queries_by_user, query_freq)
+    query_topic_rows = build_query_topic_rows(args, users, user_topics, queries_by_user, query_freq, query_labels)
     ranked_answer_ids = rank_answers_by_hotness(answer_impressions, answer_clicks)
     hot_snapshot = build_hot_snapshot(
         ranked_answer_ids, answer_impressions, answer_clicks, args.max_hot_answers
     )
+    combined_persona_clicks: List[Tuple[int, int]] = []
+    for persona_id in demo_user_ids:
+        combined_persona_clicks.extend(user_clicks.get(persona_id, []))
     selected_answer_ids = choose_selected_answers(
-        args.max_answers, ranked_answer_ids, user_clicks.get(demo_user_id, [])
+        args.max_answers, ranked_answer_ids, combined_persona_clicks
     )
     selected_answer_set = set(selected_answer_ids)
 
@@ -727,10 +1101,11 @@ def main() -> None:
             "topic_weights"
         ]
     )
-    selected_topic_ids.update(
-        topic["topic_id"]
-        for topic in top_weighted_topics(user_topics[demo_user_id], args.max_topic_weights)
-    )
+    for persona_id in demo_user_ids:
+        selected_topic_ids.update(
+            topic["topic_id"]
+            for topic in top_weighted_topics(user_topics[persona_id], args.max_topic_weights)
+        )
 
     answer_rows = []
     for answer_id in selected_answer_ids:
@@ -763,32 +1138,60 @@ def main() -> None:
         if row["question_id"] in selected_question_ids and row["topic_id"] in selected_topic_ids
     ]
 
-    demo_queries = queries_by_user.get(demo_user_id, [])
-    demo_clicks = user_clicks.get(demo_user_id, [])
-    replay_events = build_demo_event_replay(
-        demo_user_id=demo_user_id,
-        query_rows=demo_queries,
-        click_rows=demo_clicks,
-        search_window_seconds=args.search_window_seconds,
-        max_replay_events=args.max_replay_events,
+    persona_replay_events: List[List[dict]] = []
+    persona_profile_seeds: List[dict] = []
+    for persona_id in demo_user_ids:
+        persona_queries = queries_by_user.get(persona_id, [])
+        persona_clicks = user_clicks.get(persona_id, [])
+        persona_replay = build_demo_event_replay(
+            demo_user_id=persona_id,
+            query_rows=persona_queries,
+            click_rows=persona_clicks,
+            search_window_seconds=args.search_window_seconds,
+            max_replay_events=args.max_replay_events,
+        )
+        persona_replay_events.append(persona_replay)
+        persona_profile_seeds.append(
+            build_demo_user_profile_seed(
+                args=args,
+                demo_user=users[persona_id],
+                demo_clicks=persona_clicks,
+                demo_queries=persona_queries,
+                user_topics=user_topics[persona_id],
+                replay_events=persona_replay,
+            )
+        )
+
+    replay_events: List[dict] = []
+    for persona_replay in persona_replay_events:
+        replay_events.extend(persona_replay)
+    replay_events.sort(
+        key=lambda item: (item["event_ts"], 0 if item["event_type"] == "search_query" else 1)
     )
 
+    demo_user_profile_seed = persona_profile_seeds[0]
     default_profile_seed = build_default_profile_seed(global_topics, args.max_topic_weights)
-    demo_user_profile_seed = build_demo_user_profile_seed(
-        args=args,
-        demo_user=users[demo_user_id],
-        demo_clicks=demo_clicks,
-        demo_queries=demo_queries,
-        user_topics=user_topics[demo_user_id],
-        replay_events=replay_events,
-    )
+
+    persona_summary = [
+        {
+            "user_id": persona_id,
+            "display_name": users[persona_id]["display_name"],
+            "click_count": len(user_clicks.get(persona_id, [])),
+            "query_count": len(queries_by_user.get(persona_id, [])),
+            "behavior_score": persona_profile_seeds[index]["behavior_score"],
+            "top_topics": persona_profile_seeds[index]["topic_weights"],
+        }
+        for index, persona_id in enumerate(demo_user_ids)
+    ]
+
+    app_user_rows_out = [users[persona_id] for persona_id in demo_user_ids]
 
     files_written = {
         "answer.jsonl": write_jsonl(args.output_dir / "answer.jsonl", answer_rows),
         "question.jsonl": write_jsonl(args.output_dir / "question.jsonl", question_rows),
         "author.jsonl": write_jsonl(args.output_dir / "author.jsonl", author_rows),
         "topic.jsonl": write_jsonl(args.output_dir / "topic.jsonl", topic_rows),
-        "app_user.jsonl": write_jsonl(args.output_dir / "app_user.jsonl", [users[demo_user_id]]),
+        "app_user.jsonl": write_jsonl(args.output_dir / "app_user.jsonl", app_user_rows_out),
         "answer_topic.jsonl": write_jsonl(
             args.output_dir / "answer_topic.jsonl", answer_topic_selected
         ),
@@ -808,12 +1211,16 @@ def main() -> None:
 
     write_json(args.output_dir / "default_profile_seed.json", default_profile_seed)
     write_json(args.output_dir / "demo_user_profile_seed.json", demo_user_profile_seed)
+    write_json(args.output_dir / "demo_persona_profile_seeds.json", persona_profile_seeds)
+    write_json(args.output_dir / "demo_personas.json", persona_summary)
 
     manifest = {
         "source_dataset": "ZhihuRec-1M official split reconstructed from THUIR release",
         "source_data_dir": str(args.data_dir.resolve()),
         "output_dir": str(args.output_dir.resolve()),
-        "demo_user_id": demo_user_id,
+        "demo_user_id": demo_user_ids[0],
+        "demo_user_ids": list(demo_user_ids),
+        "demo_persona_count": len(demo_user_ids),
         "selected_answer_count": len(answer_rows),
         "selected_question_count": len(question_rows),
         "selected_author_count": len(author_rows),
