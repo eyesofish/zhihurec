@@ -31,6 +31,9 @@ frontend/dist/
 frontend/build/
 frontend/.next/
 frontend/coverage/
+product-frontend/node_modules/
+product-frontend/dist/
+product-frontend/.vite/
 
 # Local runtime state
 *.log
@@ -47,6 +50,9 @@ logs/
 
 # Generated offline build artifacts and import packages
 /build/demo_world/
+
+# Local plan scratch notes
+/plan/zhihurec-v1-quality-upgrade/README.md
 
 # OS and editor noise
 .DS_Store
