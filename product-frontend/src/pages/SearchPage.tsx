@@ -63,7 +63,7 @@ export default function SearchPage() {
   return (
     <main className="zr-center">
       <div style={{ marginBottom: 16 }}>
-        <SearchBox userId={selectedPersona.user_id} initialQuery={queryKey} />
+        <SearchBox initialQuery={queryKey} />
       </div>
 
       {queryKey && (

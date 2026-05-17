@@ -5,11 +5,10 @@ import { listSearchSuggestions } from "../api/client";
 import type { SuggestionItem } from "../api/types";
 
 interface Props {
-  userId: number;
   initialQuery?: string;
 }
 
-export default function SearchBox({ userId, initialQuery }: Props) {
+export default function SearchBox({ initialQuery }: Props) {
   const [query, setQuery] = useState(initialQuery ?? "");
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [open, setOpen] = useState(false);

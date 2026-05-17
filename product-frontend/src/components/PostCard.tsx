@@ -39,7 +39,7 @@ export default function PostCard({ item, userId, requestId, showReason, onTrackC
             />
             {communityName}
           </span>
-          <span>Posted by u/user-{item.author.author_id}</span>
+          {"author" in item && <span>Posted by u/user-{item.author.author_id}</span>}
         </div>
 
         <h3 className="zr-card__title">

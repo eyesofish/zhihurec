@@ -1,11 +1,9 @@
 import { Bell, Plus, MessageSquare } from "lucide-react";
 import { Link } from "react-router-dom";
-import { usePersona } from "../context/PersonaContext";
 import PersonaSwitcher from "./PersonaSwitcher";
 import SearchBox from "./SearchBox";
 
 export default function TopNav() {
-  const { selectedPersona } = usePersona();
 
   return (
     <header className="zr-topbar">
@@ -14,7 +12,7 @@ export default function TopNav() {
       </div>
 
       <div className="zr-topbar__search">
-        <SearchBox userId={selectedPersona?.user_id ?? 0} />
+        <SearchBox />
       </div>
 
       <div className="zr-topbar__actions">
