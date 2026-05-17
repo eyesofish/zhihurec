@@ -41,6 +41,8 @@
 
 **已收口但需要记住的旁路 deliverable**：离线 eval 不属于原 A/B/C/D 分类，已单独进入 `plan/zhihurec-v1-offline-eval/`。它的作用是给 V1 留一条 item-level ranking baseline，供 V2 retrieval / ranker 升级对比。
 
+**Reddit-like product frontend（2026-05-16 完成）**：新增 `product-frontend/`（React 18 + TypeScript 5.6 + Vite 5.4，端口 5174），包含 feed、search、post detail、persona 切换、vote 事件追踪、profile debug panel。对应 plan：`plan/zhihurec-reddit-product-frontend/`。
+
 **V1 之外**：本仓库 V1 工作基本收尾。V2 升级方向（双塔召回 / FAISS / LightGBM ranker / 多用户）由独立教程仓库 `D:\Github\reco_learn_path\upgrade_v2` 承接，不在本 `plan/` 范围。E 计划的所有决策（pyproject 不声明为 package、测试不打 SQL、`requirements.txt` 不含 ML deps）都已为 V2 接入留好口子，见 `plan/zhihurec-v1-quality-upgrade/README.md` "与 upgrade_v2 的接口考虑" 段。
 
 ---
