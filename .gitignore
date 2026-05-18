@@ -72,3 +72,22 @@ Thumbs.db
 Desktop.ini
 .idea/
 .vscode/
+
+# Course deliverables — go to Canvas, not GitHub
+/target/
+
+# Personal materials — resume drafts, interview talking points, project stories
+/story/
+
+# Another course's plan — kept local, not part of zhihurec repo identity
+/plan/ecs281-progress-report/
+
+# LaTeX build artifacts (defensive — target/ already covers current usage)
+*.aux
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.toc
+*.bbl
+*.blg
