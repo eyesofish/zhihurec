@@ -34,7 +34,6 @@ For evaluation, cite the compact summary in `docs/v1_metrics.md`: `Search Carryo
 
 | You are... | Read this |
 |---|---|
-| **A new visitor / interviewer** | `docs/resume_bullet.md` (English + Chinese versions, 1-minute pitch, evidence boundaries) |
 | **Resuming work on this project** | `plan/zhihurec-v1-gap-checklist/README.md` — the canonical "what's left" tracker, with a copy-pastable resume prompt at the bottom |
 | **Trying to understand the V1 boundary** | `plan/project_brief_zh.md` §14 / §18 (Chinese) |
 | **Looking for the architecture** | `docs/v1_api_contract.md` for the API surface; `backend/app/repositories/mysql.py` for the SQL recall path |
