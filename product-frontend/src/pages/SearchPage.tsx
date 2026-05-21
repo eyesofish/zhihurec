@@ -9,26 +9,35 @@ import SearchBox from "../components/SearchBox";
 export default function SearchPage() {
   const { selectedPersona, bumpProfile } = usePersona();
   const [searchParams] = useSearchParams();
-  const queryKey = searchParams.get("q") ?? "";
+  const rawQuery = searchParams.get("q") ?? "";
+  const isExact = searchParams.get("exact") === "1";
   const [items, setItems] = useState<SearchItem[]>([]);
+  const [resolvedQueryKey, setResolvedQueryKey] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedPersona || !queryKey) return;
+    if (!selectedPersona || !rawQuery) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
     setItems([]);
-    postSearch(selectedPersona.user_id, queryKey, 10)
+    setResolvedQueryKey("");
+    const input = isExact ? { queryKey: rawQuery } : { queryText: rawQuery };
+    postSearch(selectedPersona.user_id, input, 10)
       .then((res) => {
         if (cancelled) return;
         setItems(res.items);
+        setResolvedQueryKey(res.query_key);
         bumpProfile();
       })
       .catch((err: Error) => {
         if (cancelled) return;
-        setError(err.message);
+        if (err.message.startsWith("422")) {
+          setError("No matching query found. Try a suggested query.");
+        } else {
+          setError(err.message);
+        }
       })
       .finally(() => {
         if (cancelled) return;
@@ -37,7 +46,7 @@ export default function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPersona, queryKey, bumpProfile]);
+  }, [selectedPersona, rawQuery, isExact, bumpProfile]);
 
   const handleClick = useCallback(
     (answerId: number) => {
@@ -47,10 +56,10 @@ export default function SearchPage() {
         event_type: "search_result_click",
         surface: "search",
         answer_id: answerId,
-        query_key: queryKey,
+        query_key: resolvedQueryKey || rawQuery,
       }).then(() => bumpProfile());
     },
-    [selectedPersona, queryKey, bumpProfile],
+    [selectedPersona, resolvedQueryKey, rawQuery, bumpProfile],
   );
 
   if (!selectedPersona) {
@@ -64,20 +73,20 @@ export default function SearchPage() {
   return (
     <main className="zr-center">
       <div style={{ marginBottom: 16 }}>
-        <SearchBox initialQuery={queryKey} />
+        <SearchBox initialQuery={rawQuery} />
       </div>
 
-      {queryKey && (
+      {rawQuery && (
         <div style={{ fontSize: 13, color: "var(--zr-text-muted)", marginBottom: 12 }}>
-          Results for <strong>{queryKey}</strong>
+          Results for <strong>{rawQuery}</strong>
         </div>
       )}
 
       {loading && <div className="zr-status">Searching...</div>}
       {error && <div className="zr-status">Search failed: {error}</div>}
 
-      {!loading && !error && queryKey && items.length === 0 && (
-        <div className="zr-status">No results for "{queryKey}".</div>
+      {!loading && !error && rawQuery && items.length === 0 && (
+        <div className="zr-status">No results for "{rawQuery}".</div>
       )}
 
       {items.map((item) => (

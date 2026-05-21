@@ -38,6 +38,7 @@ from backend.app.repositories.profile_dao import (
     load_recent_query_topic_scores,
     profile_from_row,
 )
+from backend.app.repositories.query_resolver import resolve_query_key
 from backend.app.repositories.ranker import build_feature_dict, score_candidates
 from backend.app.schemas.answer import AnswerCardResponse
 from backend.app.schemas.common import AuthorCard, TopicCard
@@ -262,10 +263,10 @@ class MysqlRuntimeRepository(RuntimeRepository):
             connection.close()
 
     def search(self, payload: SearchRequest) -> SearchResponse:
-        query_key = normalize_query_key(payload.query_key)
         event_ts = int(time.time())
         connection = connect(self._connection_config)
         try:
+            query_key = resolve_query_key(connection, payload.query_key, payload.query_text)
             connection.begin()
             profile_row = fetch_profile_row(connection, payload.user_id)
             record_search_query(

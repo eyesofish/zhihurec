@@ -10,3 +10,11 @@ class RepositoryNotReadyError(RuntimeError):
             "The backend skeleton is live, but SQL-backed handlers are the next step."
         )
         self.operation = operation
+
+
+class UnresolvedQueryError(ValueError):
+    """Raised when a search input cannot be mapped to a known query_key."""
+
+    def __init__(self, query_input: str) -> None:
+        super().__init__("No matching query found. Try a suggested query.")
+        self.query_input = query_input

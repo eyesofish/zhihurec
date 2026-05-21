@@ -1,24 +1,38 @@
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from .common import ApiModel, TopicCard
 
 
 class SearchRequest(ApiModel):
     user_id: int
-    query_key: str = Field(..., min_length=1)
+    query_key: str | None = None
     query_text: str | None = None
     page_size: int = Field(10, ge=1, le=50)
     debug: bool = False
 
     @field_validator("query_key")
     @classmethod
-    def normalize_query_key(cls, value: str) -> str:
+    def normalize_query_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = " ".join(value.split())
-        if not normalized:
-            raise ValueError("query_key must not be blank")
-        return normalized
+        return normalized or None
+
+    @field_validator("query_text")
+    @classmethod
+    def normalize_query_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def require_query_key_or_text(self) -> SearchRequest:
+        if not self.query_key and not self.query_text:
+            raise ValueError("query_key or query_text is required")
+        return self
 
 
 class SearchItemScores(ApiModel):

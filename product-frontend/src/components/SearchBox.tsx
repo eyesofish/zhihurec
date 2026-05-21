@@ -52,11 +52,16 @@ export default function SearchBox({ initialQuery }: Props) {
     setOpen(true);
   };
 
-  const handleSubmit = (queryKey?: string) => {
-    const key = queryKey ?? query.trim();
-    if (!key) return;
+  const handleSubmit = (suggestionKey?: string) => {
+    if (suggestionKey) {
+      setOpen(false);
+      navigate(`/search?q=${encodeURIComponent(suggestionKey)}&exact=1`);
+      return;
+    }
+    const text = query.trim();
+    if (!text) return;
     setOpen(false);
-    navigate(`/search?q=${encodeURIComponent(key)}`);
+    navigate(`/search?q=${encodeURIComponent(text)}`);
   };
 
   return (

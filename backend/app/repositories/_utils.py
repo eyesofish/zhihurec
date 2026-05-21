@@ -49,6 +49,13 @@ def query_tokens(query_key: str) -> list[int]:
     return tokens
 
 
+def is_numeric_query_key(query_key: str) -> bool:
+    parts = (query_key or "").split()
+    if not parts:
+        return False
+    return all(part.lstrip("-").isdigit() for part in parts)
+
+
 def parse_topic_weights(value: Any) -> list[ProfileTopicWeight]:
     rows = parse_json(value, [])
     return [

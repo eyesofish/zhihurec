@@ -50,14 +50,24 @@ export function getFeed(userId: number, pageSize = 10, debug = false): Promise<F
   });
 }
 
+export interface SearchInput {
+  queryText?: string;
+  queryKey?: string;
+}
+
 export function postSearch(
   userId: number,
-  queryKey: string,
+  input: SearchInput,
   pageSize = 10,
 ): Promise<SearchResponse> {
   return request<SearchResponse>("/search", {
     method: "POST",
-    body: JSON.stringify({ user_id: userId, query_key: queryKey, page_size: pageSize }),
+    body: JSON.stringify({
+      user_id: userId,
+      query_text: input.queryText,
+      query_key: input.queryKey,
+      page_size: pageSize,
+    }),
   });
 }
 

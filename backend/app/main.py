@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.app.config import get_settings
-from backend.app.errors import RepositoryNotReadyError
+from backend.app.errors import RepositoryNotReadyError, UnresolvedQueryError
 from backend.app.routers.answers import router as answers_router
 from backend.app.routers.debug import router as debug_router
 from backend.app.routers.event import router as event_router
@@ -52,6 +52,21 @@ def create_app() -> FastAPI:
                 "detail": str(exc),
                 "error_code": "repository_not_ready",
                 "operation": exc.operation,
+                "path": request.url.path,
+            },
+        )
+
+    @app.exception_handler(UnresolvedQueryError)
+    async def unresolved_query_handler(
+        request: Request,
+        exc: UnresolvedQueryError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": str(exc),
+                "error_code": "unresolved_query",
+                "query_input": exc.query_input,
                 "path": request.url.path,
             },
         )
