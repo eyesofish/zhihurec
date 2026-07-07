@@ -4,6 +4,13 @@ import time
 from typing import Any, cast
 
 from backend.app.config import Settings, compute_alpha
+from backend.app.events.publisher import (
+    EventPublisher,
+    EventPublishError,
+    build_event_publisher,
+    log_dual_write_failure,
+)
+from backend.app.events.schema import UserEventMessage, UserEventType
 from backend.app.repositories._utils import (
     add_feed_candidate,
     new_request_id,
@@ -78,11 +85,16 @@ from backend.app.schemas.suggestion import SuggestionItem, SuggestionListRespons
 class MysqlRuntimeRepository(RuntimeRepository):
     backend_name = "mysql"
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        event_publisher: EventPublisher | None = None,
+    ) -> None:
         if not settings.database_url.strip():
             raise ValueError("ZHIHUREC_DATABASE_URL is required for MysqlRuntimeRepository")
         self._settings = settings
         self._connection_config = parse_database_url(settings.database_url)
+        self._event_publisher = event_publisher or build_event_publisher(settings)
 
     # ── public API ──────────────────────────────────────────────
 
@@ -267,21 +279,31 @@ class MysqlRuntimeRepository(RuntimeRepository):
         connection = connect(self._connection_config)
         try:
             query_key = resolve_query_key(connection, payload.query_key, payload.query_text)
-            connection.begin()
-            profile_row = fetch_profile_row(connection, payload.user_id)
-            record_search_query(
-                connection=connection,
+            event = self._event_message(
+                event_type="search_query",
                 user_id=payload.user_id,
                 query_key=query_key,
+                query_text=payload.query_text,
+                surface="search",
                 event_ts=event_ts,
             )
-            append_recent_query(
-                connection=connection,
-                profile_row=profile_row,
-                query_key=query_key,
-                event_ts=event_ts,
-                behavior_delta=self._settings.search_query_behavior_delta,
-            )
+            connection.begin()
+            if self._settings.event_mode != "kafka_async":
+                profile_row = fetch_profile_row(connection, payload.user_id)
+                record_search_query(
+                    connection=connection,
+                    user_id=payload.user_id,
+                    query_key=query_key,
+                    event_ts=event_ts,
+                    external_event_id=event.event_id,
+                )
+                append_recent_query(
+                    connection=connection,
+                    profile_row=profile_row,
+                    query_key=query_key,
+                    event_ts=event_ts,
+                    behavior_delta=self._settings.search_query_behavior_delta,
+                )
 
             matched_topics = load_search_matched_topics(connection, query_key)
             search_candidates = load_search_candidates(
@@ -348,6 +370,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 else None,
             )
             connection.commit()
+            self._publish_event(event)
             return response
         except Exception:
             connection.rollback()
@@ -357,6 +380,18 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
     def record_recommendation_click(self, payload: RecommendationClickRequest) -> EventAckResponse:
         event_ts = int(time.time())
+        event = self._event_message(
+            event_type="recommendation_click",
+            user_id=payload.user_id,
+            answer_id=payload.answer_id,
+            request_id=payload.request_id,
+            surface="feed",
+            event_ts=event_ts,
+        )
+        if self._settings.event_mode == "kafka_async":
+            self._publish_event(event)
+            return EventAckResponse(ok=True, event_type="recommendation_click", debug=None)
+
         connection = connect(self._connection_config)
         try:
             connection.begin()
@@ -376,6 +411,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 surface="feed",
                 event_ts=event_ts,
                 topic_ids=answer_topic_ids,
+                external_event_id=event.event_id,
             )
             update = apply_click_profile_update(
                 connection=connection,
@@ -398,6 +434,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 else None,
             )
             connection.commit()
+            self._publish_event(event)
             return response
         except Exception:
             connection.rollback()
@@ -408,6 +445,19 @@ class MysqlRuntimeRepository(RuntimeRepository):
     def record_search_result_click(self, payload: SearchResultClickRequest) -> EventAckResponse:
         query_key = normalize_query_key(payload.query_key)
         event_ts = int(time.time())
+        event = self._event_message(
+            event_type="search_result_click",
+            user_id=payload.user_id,
+            answer_id=payload.answer_id,
+            query_key=query_key,
+            request_id=payload.request_id,
+            surface="search",
+            event_ts=event_ts,
+        )
+        if self._settings.event_mode == "kafka_async":
+            self._publish_event(event)
+            return EventAckResponse(ok=True, event_type="search_result_click", debug=None)
+
         connection = connect(self._connection_config)
         try:
             connection.begin()
@@ -434,6 +484,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 surface="search",
                 event_ts=event_ts,
                 topic_ids=topic_ids,
+                external_event_id=event.event_id,
             )
             update = apply_click_profile_update(
                 connection=connection,
@@ -460,6 +511,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 else None,
             )
             connection.commit()
+            self._publish_event(event)
             return response
         except Exception:
             connection.rollback()
@@ -587,10 +639,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 if isinstance(ack.debug, RecommendationClickDebug)
                 else None
             )
+            profile_updated = self._settings.event_mode != "kafka_async"
             return EventTrackResponse(
                 ok=ack.ok,
                 event_type=payload.event_type,
-                profile_updated=True,
+                profile_updated=profile_updated,
                 behavior_score=behavior_score,
             )
 
@@ -611,10 +664,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 if isinstance(ack.debug, SearchResultClickDebug)
                 else None
             )
+            profile_updated = self._settings.event_mode != "kafka_async"
             return EventTrackResponse(
                 ok=ack.ok,
                 event_type=payload.event_type,
-                profile_updated=True,
+                profile_updated=profile_updated,
                 behavior_score=behavior_score,
             )
 
@@ -624,6 +678,25 @@ class MysqlRuntimeRepository(RuntimeRepository):
             # Apply the same positive profile update as a recommendation click,
             # but stamp the user_event row with event_type='upvote' for analytics distinction.
             event_ts = int(time.time())
+            event = self._event_message(
+                event_type="upvote",
+                user_id=payload.user_id,
+                answer_id=payload.answer_id,
+                query_key=payload.query_key,
+                request_id=payload.request_id,
+                surface=payload.surface or "home_feed",
+                event_ts=event_ts,
+                dwell_ms=payload.dwell_ms,
+            )
+            if self._settings.event_mode == "kafka_async":
+                self._publish_event(event)
+                return EventTrackResponse(
+                    ok=True,
+                    event_type=payload.event_type,
+                    profile_updated=False,
+                    behavior_score=None,
+                )
+
             connection = connect(self._connection_config)
             try:
                 connection.begin()
@@ -643,6 +716,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     surface=payload.surface or "home_feed",
                     event_ts=event_ts,
                     topic_ids=answer_topic_ids,
+                    external_event_id=event.event_id,
                 )
                 update = apply_click_profile_update(
                     connection=connection,
@@ -654,6 +728,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     decay_factor=self._settings.profile_topic_decay,
                 )
                 connection.commit()
+                self._publish_event(event)
             except Exception:
                 connection.rollback()
                 raise
@@ -668,6 +743,25 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
         # Log-only events: feed_impression, detail_view, dwell, downvote, share
         event_ts = int(time.time())
+        event = self._event_message(
+            event_type=cast(UserEventType, payload.event_type),
+            user_id=payload.user_id,
+            answer_id=payload.answer_id,
+            query_key=payload.query_key,
+            request_id=payload.request_id,
+            surface=payload.surface or "home_feed",
+            event_ts=event_ts,
+            dwell_ms=payload.dwell_ms,
+        )
+        if self._settings.event_mode == "kafka_async":
+            self._publish_event(event)
+            return EventTrackResponse(
+                ok=True,
+                event_type=payload.event_type,
+                profile_updated=False,
+                behavior_score=None,
+            )
+
         connection = connect(self._connection_config)
         try:
             record_log_only_event(
@@ -680,9 +774,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 request_id=payload.request_id,
                 event_ts=event_ts,
                 debug_payload_json=None,
+                external_event_id=event.event_id,
             )
         finally:
             connection.close()
+        self._publish_event(event)
         return EventTrackResponse(
             ok=True,
             event_type=payload.event_type,
@@ -691,6 +787,42 @@ class MysqlRuntimeRepository(RuntimeRepository):
         )
 
     # ── orchestrator helpers ────────────────────────────────────
+
+    def _event_message(
+        self,
+        *,
+        event_type: UserEventType,
+        user_id: int,
+        event_ts: int,
+        answer_id: int | None = None,
+        query_key: str | None = None,
+        query_text: str | None = None,
+        request_id: str | None = None,
+        surface: str = "feed",
+        dwell_ms: int | None = None,
+    ) -> UserEventMessage:
+        return UserEventMessage(
+            event_type=event_type,
+            user_id=user_id,
+            answer_id=answer_id,
+            query_key=query_key,
+            query_text=query_text,
+            request_id=request_id,
+            surface=surface,
+            event_ts=event_ts,
+            dwell_ms=dwell_ms,
+        )
+
+    def _publish_event(self, event: UserEventMessage) -> None:
+        if not self._settings.kafka_enabled:
+            return
+        try:
+            self._event_publisher.publish_user_event(event)
+        except EventPublishError as exc:
+            if self._settings.event_mode == "kafka_dual_write":
+                log_dual_write_failure(exc)
+                return
+            raise
 
     def _load_feed_candidates(
         self,

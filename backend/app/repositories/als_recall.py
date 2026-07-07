@@ -32,7 +32,7 @@ class ALSRecall:
         if not self._index_path.exists():
             return  # not trained yet — all calls become no-ops
 
-        import faiss  # type: ignore[import-untyped]
+        import faiss
 
         self._index = faiss.read_index(str(self._index_path))
         self._user_embeddings = np.load(str(self._user_emb_path))

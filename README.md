@@ -38,7 +38,7 @@ For evaluation, cite the compact summary in `docs/v1_metrics.md`: `Search Carryo
 | **Trying to understand the V1 boundary** | `plan/project_brief_zh.md` §14 / §18 (Chinese) |
 | **Looking for the architecture** | `docs/v1_api_contract.md` for the API surface; `backend/app/repositories/mysql.py` for the SQL recall path |
 | **Data analysis & evidence** | `docs/data_analysis_report.md` (7 sections, 12 figures), `docs/hci_report.md`, `docs/v1_metrics.md` |
-| **Planning the V2 ML upgrade** | `D:\Github\reco_learn_path\upgrade_v2\README.md` — multi-stage architecture, offline eval, ALS / FAISS, LightGBM, two-tower |
+| **Planning the V2 Kafka/ML upgrade** | `plan/zhihurec-v2-kafka-upgrade/README.md` — Kafka event stream, async profile updates, training-sample sink, and a path toward stronger retrieval/ranking |
 
 ## Tech stack
 
@@ -50,7 +50,7 @@ For evaluation, cite the compact summary in `docs/v1_metrics.md`: `Search Carryo
 
 ## Non-goals (by design — see `plan/project_brief_zh.md` §14)
 
-V1 explicitly does **not** ship: Redis, message queues, authentication, JWT, multi-user state, microservices, container deployment of the app itself (only MySQL is containerised), heavy frontend framework, or full deep-learning recall / ranking. Those live in `D:\Github\reco_learn_path\upgrade_v2`.
+V1 explicitly does **not** ship: Redis, message queues, authentication, JWT, multi-user state, microservices, container deployment of the app itself (only MySQL is containerised), heavy frontend framework, or full deep-learning recall / ranking. Kafka-backed event streaming and async profile updates are planned as V2 work in `plan/zhihurec-v2-kafka-upgrade/`.
 
 ## Development
 

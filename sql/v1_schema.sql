@@ -188,6 +188,7 @@ CREATE TABLE user_profile (
 
 CREATE TABLE user_event (
   event_id BIGINT NOT NULL AUTO_INCREMENT,
+  external_event_id VARCHAR(80) NULL COMMENT 'V2 idempotency key from Kafka/event producer.',
   user_id BIGINT NOT NULL,
   event_type ENUM(
     'search_query',
@@ -211,6 +212,7 @@ CREATE TABLE user_event (
   event_ts BIGINT NOT NULL,
   debug_payload_json JSON NULL,
   PRIMARY KEY (event_id),
+  UNIQUE KEY uq_user_event_external_event_id (external_event_id),
   KEY idx_user_event_user_ts (user_id, event_ts),
   KEY idx_user_event_type_ts (event_type, event_ts),
   KEY idx_user_event_answer (answer_id),

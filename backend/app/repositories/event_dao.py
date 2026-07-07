@@ -17,11 +17,13 @@ def record_search_query(
     user_id: int,
     query_key: str,
     event_ts: int,
+    external_event_id: str | None = None,
 ) -> None:
     with connection.cursor() as cursor:
         cursor.execute(
             """
             INSERT INTO user_event (
+              external_event_id,
               user_id,
               event_type,
               query_key,
@@ -30,9 +32,10 @@ def record_search_query(
               source_confidence,
               event_ts
             )
-            VALUES (%s, 'search_query', %s, %s, 'search', 'confirmed', %s)
+            VALUES (%s, %s, 'search_query', %s, %s, 'search', 'confirmed', %s)
             """,
             (
+                external_event_id,
                 user_id,
                 query_key,
                 json_text(query_tokens(query_key)),
@@ -90,11 +93,13 @@ def record_click_event(
     surface: str,
     event_ts: int,
     topic_ids: list[int],
+    external_event_id: str | None = None,
 ) -> None:
     with connection.cursor() as cursor:
         cursor.execute(
             """
             INSERT INTO user_event (
+              external_event_id,
               user_id,
               event_type,
               answer_id,
@@ -106,9 +111,10 @@ def record_click_event(
               source_confidence,
               event_ts
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'confirmed', %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'confirmed', %s)
             """,
             (
+                external_event_id,
                 user_id,
                 event_type,
                 answer_id,
@@ -132,6 +138,7 @@ def record_log_only_event(
     request_id: str | None,
     event_ts: int,
     debug_payload_json: str | None,
+    external_event_id: str | None = None,
 ) -> None:
     """Insert a user_event row without mutating user_profile.
 
@@ -142,6 +149,7 @@ def record_log_only_event(
         cursor.execute(
             """
             INSERT INTO user_event (
+              external_event_id,
               user_id,
               event_type,
               answer_id,
@@ -154,9 +162,10 @@ def record_log_only_event(
               event_ts,
               debug_payload_json
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'not_applicable', %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'not_applicable', %s, %s)
             """,
             (
+                external_event_id,
                 user_id,
                 event_type,
                 answer_id,
@@ -169,6 +178,20 @@ def record_log_only_event(
                 debug_payload_json,
             ),
         )
+
+
+def has_external_event_id(connection: Any, external_event_id: str) -> bool:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT event_id
+            FROM user_event
+            WHERE external_event_id = %s
+            LIMIT 1
+            """,
+            (external_event_id,),
+        )
+        return cursor.fetchone() is not None
 
 
 def apply_click_profile_update(

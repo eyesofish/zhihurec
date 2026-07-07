@@ -2191,12 +2191,14 @@ Codex 现在应开始以结构化方式推进这个项目的落地。
 - 已存在 `docs/v1_local_runbook.md`、`scripts/init_local.ps1`、`scripts/apply_demo_mysql.py`、`scripts/reset_demo_user.py`、`scripts/replay_demo_events.py`，构成本地一键初始化与离线回放的最小工具集。
 - 已存在 `plan/zhihurec-v1-runtime-closed-loop/`（runtime 闭环执行计划，全部 7 步已 verified）和 `plan/zhihurec-v1-gap-checklist/`（冷启动续接清单 + 傻瓜操作手册）。
 - 已存在 `plan/zhihurec-v1-cold-start-mixing/`，其中 5 步已经完成：schema/seed 校验、alpha 函数、feed ranking 混合、debug payload 暴露和 eval rerun。
+- 已存在 `plan/zhihurec-v2-kafka-upgrade/`，作为 V2 事件流升级计划：Kafka 只进入 V2，用于 search/click/upvote 等行为事件的异步画像更新和训练样本管道，不改变 V1 “不引入消息队列”的边界。
 
 这意味着：
 
 - 项目方向、schema、API 契约、离线导入包、后端骨架、MySQL runtime、极简调试前端、离线回放脚本已经全部到位。
 - 当前阶段已经离开”写代码之前的边界确认”和”runtime 闭环搭建”，进入”V1 故事完整度收尾 + 课程产出”阶段。
 - 接下来最重要的工作不是继续发散想法，而是按 `plan/zhihurec-v1-gap-checklist/` 把 brief §17 要求的代理指标（Search Carryover Gain@K）、brief §0 要求的数据分析报告与 HCI 报告这些剩余产出补齐。
+- 如果进入 V2，优先按 `plan/zhihurec-v2-kafka-upgrade/` 从 Kafka 事件边界开始，而不是直接把整个单体拆成多服务。
 
 ### 这份文档的角色
 

@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from backend.app.config import get_settings
 from backend.app.errors import RepositoryNotReadyError, UnresolvedQueryError
+from backend.app.events.publisher import EventPublishError
 from backend.app.routers.answers import router as answers_router
 from backend.app.routers.debug import router as debug_router
 from backend.app.routers.event import router as event_router
@@ -67,6 +68,20 @@ def create_app() -> FastAPI:
                 "detail": str(exc),
                 "error_code": "unresolved_query",
                 "query_input": exc.query_input,
+                "path": request.url.path,
+            },
+        )
+
+    @app.exception_handler(EventPublishError)
+    async def event_publish_error_handler(
+        request: Request,
+        exc: EventPublishError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": str(exc),
+                "error_code": "event_publish_failed",
                 "path": request.url.path,
             },
         )

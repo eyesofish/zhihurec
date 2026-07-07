@@ -3,6 +3,18 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Literal, cast
+
+EventMode = Literal["sync_mysql", "kafka_dual_write", "kafka_async"]
+
+
+def parse_event_mode(value: str) -> EventMode:
+    normalized = value.strip().lower()
+    if normalized in {"sync_mysql", "kafka_dual_write", "kafka_async"}:
+        return cast(EventMode, normalized)
+    raise ValueError(
+        "ZHIHUREC_EVENT_MODE must be one of: sync_mysql, kafka_dual_write, kafka_async"
+    )
 
 
 @dataclass(frozen=True)
@@ -25,6 +37,13 @@ class Settings:
     cold_start_default_seed_key: str = "cold_start_default"
     als_recall_top_k: int = 200
     als_recall_enabled: bool = True
+    event_mode: EventMode = "sync_mysql"
+    kafka_bootstrap_servers: str = "127.0.0.1:9092"
+    kafka_client_id: str = "zhihurec-api"
+    kafka_profile_group_id: str = "zhihurec-profile-consumer"
+    kafka_raw_events_topic: str = "zhihurec.events.raw"
+    kafka_training_topic: str = "zhihurec.training.interactions"
+    kafka_dlq_topic: str = "zhihurec.events.dlq"
     cors_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -35,6 +54,10 @@ class Settings:
     @property
     def database_configured(self) -> bool:
         return bool(self.database_url.strip())
+
+    @property
+    def kafka_enabled(self) -> bool:
+        return self.event_mode in {"kafka_dual_write", "kafka_async"}
 
 
 def compute_alpha(behavior_score: float, settings: Settings) -> float:
@@ -79,6 +102,25 @@ def get_settings() -> Settings:
         ),
         als_recall_top_k=int(os.getenv("ZHIHUREC_ALS_RECALL_TOP_K", "200")),
         als_recall_enabled=os.getenv("ZHIHUREC_ALS_RECALL_ENABLED", "1").lower() in ("1", "true", "yes"),
+        event_mode=parse_event_mode(os.getenv("ZHIHUREC_EVENT_MODE", "sync_mysql")),
+        kafka_bootstrap_servers=os.getenv(
+            "ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS",
+            "127.0.0.1:9092",
+        ),
+        kafka_client_id=os.getenv("ZHIHUREC_KAFKA_CLIENT_ID", "zhihurec-api"),
+        kafka_profile_group_id=os.getenv(
+            "ZHIHUREC_KAFKA_PROFILE_GROUP_ID",
+            "zhihurec-profile-consumer",
+        ),
+        kafka_raw_events_topic=os.getenv(
+            "ZHIHUREC_KAFKA_RAW_EVENTS_TOPIC",
+            "zhihurec.events.raw",
+        ),
+        kafka_training_topic=os.getenv(
+            "ZHIHUREC_KAFKA_TRAINING_TOPIC",
+            "zhihurec.training.interactions",
+        ),
+        kafka_dlq_topic=os.getenv("ZHIHUREC_KAFKA_DLQ_TOPIC", "zhihurec.events.dlq"),
         cors_origins=tuple(
             origin.strip()
             for origin in os.getenv(

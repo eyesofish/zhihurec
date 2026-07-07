@@ -43,7 +43,7 @@
 
 **Reddit-like product frontend（2026-05-16 完成）**：新增 `product-frontend/`（React 18 + TypeScript 5.6 + Vite 5.4，端口 5174），包含 feed、search、post detail、persona 切换、vote 事件追踪、profile debug panel。对应 plan：`plan/zhihurec-reddit-product-frontend/`。
 
-**V1 之外**：本仓库 V1 工作基本收尾。V2 升级方向（双塔召回 / FAISS / LightGBM ranker / 多用户）由独立教程仓库 `D:\Github\reco_learn_path\upgrade_v2` 承接，不在本 `plan/` 范围。E 计划的所有决策（pyproject 不声明为 package、测试不打 SQL、`requirements.txt` 不含 ML deps）都已为 V2 接入留好口子，见 `plan/zhihurec-v1-quality-upgrade/README.md` "与 upgrade_v2 的接口考虑" 段。
+**V1 之外**：本仓库 V1 工作基本收尾。V2 升级现在由仓库内 `plan/zhihurec-v2-kafka-upgrade/` 承接：第一步不是全量微服务化，而是在现有搜索/推荐闭环外增加 Kafka 事件流、异步画像更新和训练样本管道。E 计划的所有决策（pyproject 不声明为 package、测试不打 SQL、`requirements.txt` 不含 ML deps）仍为 V2 接入留好口子。
 
 ---
 
@@ -801,8 +801,9 @@ Get-Content docs\v1_local_runbook.md | Select-String '2.5 Start MySQL via Docker
 3. D:\Github\zhihurec\docs\v1_metrics.md（Carryover Gain@K 三条基线 + Recall@K / NDCG@K 首条基线）
 4. D:\Github\zhihurec\plan\zhihurec-v1-offline-eval\README.md（离线 item-ranking baseline 的正式 deliverable 入口）
 5. D:\Github\zhihurec\docs\hci_report.md（C2 §4 / §6 还是骨架——若选 A 方向直接从这里继续）
-6. D:\Github\zhihurec\plan\zhihurec-v1-quality-upgrade\README.md（2026-05-16 完成的 E plan；"与 upgrade_v2 的接口考虑" 段说明 V2 衔接预留）
-7. D:\Github\zhihurec\backend\README.md 与 D:\Github\zhihurec\docs\v1_local_runbook.md（运行命令）
+6. D:\Github\zhihurec\plan\zhihurec-v1-quality-upgrade\README.md（2026-05-16 完成的 E plan；质量护栏为 V2 衔接预留）
+7. D:\Github\zhihurec\plan\zhihurec-v2-kafka-upgrade\README.md（仓库内 V2 Kafka 事件流升级计划）
+8. D:\Github\zhihurec\backend\README.md 与 D:\Github\zhihurec\docs\v1_local_runbook.md（运行命令）
 
 历史进度速读（至 2026-05-16 末）：
 - runtime-closed-loop / cold-start-mixing / a2-init-local / data-analysis-report / quality-upgrade 五个 plan 全部完成。
@@ -818,7 +819,7 @@ Get-Content docs\v1_local_runbook.md | Select-String '2.5 Start MySQL via Docker
 
 下一步选择（让用户挑）：
 A. **关 C2 报告**：起容器 + `scripts/init_local.ps1` 跑浏览器，按 `docs/hci_report.md` §4 拍 4 段截图叙事，N=3-5 真人走查后回填 §6 评估方法与访谈摘录。结束后 V1 课程产出三件套（C1/C2/C3）全部齐。
-B. **跨仓库进 V2**：本仓库 V1 工作已基本收尾，V2 升级（双塔 / FAISS / LightGBM ranker / 多用户）由独立教程仓库 `D:\Github\reco_learn_path\upgrade_v2` 承接。E 计划的所有架构决策都已为 V2 接入留口（pyproject 不声明 package / 测试不打 SQL / `requirements.txt` 不含 ML deps）。
+B. **进入 V2**：本仓库 V1 工作已基本收尾，V2 升级从 `plan/zhihurec-v2-kafka-upgrade/` 开始：Kafka 先作为 search/click/upvote 事件流与异步画像更新管道，再承接训练样本输出；不要一开始就把整个系统拆成微服务。E 计划的所有架构决策都已为 V2 接入留口（pyproject 不声明 package / 测试不打 SQL / `requirements.txt` 不含 ML deps）。
 
 约束（不变）：
 - MySQL 是 V1 唯一在线运行时真源。
