@@ -50,6 +50,9 @@ export default function PostCard({
             />
             {communityName}
           </span>
+          {isFeedItem(item) && item.content_type === "sponsored" && (
+            <span className="zr-card__sponsored">{item.sponsored?.label ?? "Sponsored"}</span>
+          )}
           {"author" in item && <span>Posted by u/user-{item.author.author_id}</span>}
         </div>
 

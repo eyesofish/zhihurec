@@ -50,6 +50,7 @@ logs/
 
 # Generated offline build artifacts and import packages
 /build/demo_world/
+/build/demo_fixture/
 
 # Local plan scratch notes
 /plan/zhihurec-v1-quality-upgrade/README.md

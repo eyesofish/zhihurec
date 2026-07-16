@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { postSearch, trackEvent } from "../api/client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
+import { postSearch, stableClientId, trackEvent } from "../api/client";
 import type { SearchItem } from "../api/types";
 import { usePersona } from "../context/PersonaContext";
 import PostCard from "../components/PostCard";
@@ -8,13 +8,23 @@ import SearchBox from "../components/SearchBox";
 
 export default function SearchPage() {
   const { selectedPersona, bumpProfile } = usePersona();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const rawQuery = searchParams.get("q") ?? "";
   const isExact = searchParams.get("exact") === "1";
   const [items, setItems] = useState<SearchItem[]>([]);
   const [resolvedQueryKey, setResolvedQueryKey] = useState<string>("");
+  const [requestId, setRequestId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const searchEventId = useMemo(
+    () =>
+      stableClientId(
+        "search",
+        `${location.key}:${selectedPersona?.user_id ?? "none"}:${rawQuery}:${isExact}`,
+      ),
+    [location.key, selectedPersona?.user_id, rawQuery, isExact],
+  );
 
   useEffect(() => {
     if (!selectedPersona || !rawQuery) return;
@@ -24,11 +34,12 @@ export default function SearchPage() {
     setItems([]);
     setResolvedQueryKey("");
     const input = isExact ? { queryKey: rawQuery } : { queryText: rawQuery };
-    postSearch(selectedPersona.user_id, input, 10)
+    postSearch(selectedPersona.user_id, input, 10, searchEventId)
       .then((res) => {
         if (cancelled) return;
         setItems(res.items);
         setResolvedQueryKey(res.query_key);
+        setRequestId(res.request_id);
         bumpProfile();
       })
       .catch((err: Error) => {
@@ -46,20 +57,22 @@ export default function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPersona, rawQuery, isExact, bumpProfile]);
+  }, [selectedPersona, rawQuery, isExact, bumpProfile, searchEventId]);
 
   const handleClick = useCallback(
     (answerId: number) => {
       if (!selectedPersona) return;
       trackEvent({
+        event_id: `search-click-${requestId}:${answerId}`,
         user_id: selectedPersona.user_id,
         event_type: "search_result_click",
         surface: "search",
         answer_id: answerId,
         query_key: resolvedQueryKey || rawQuery,
+        request_id: requestId || searchEventId,
       }).then(() => bumpProfile());
     },
-    [selectedPersona, resolvedQueryKey, rawQuery, bumpProfile],
+    [selectedPersona, resolvedQueryKey, rawQuery, requestId, searchEventId, bumpProfile],
   );
 
   if (!selectedPersona) {

@@ -4,17 +4,21 @@ from .common import ApiModel
 
 
 class RecommendationClickRequest(ApiModel):
+    event_id: str | None = None
     user_id: int
     answer_id: int
     request_id: str | None = None
+    sponsored_delivery_id: str | None = None
     debug: bool = False
 
 
 class SearchResultClickRequest(ApiModel):
+    event_id: str | None = None
     user_id: int
     answer_id: int
     query_key: str
     request_id: str | None = None
+    sponsored_delivery_id: str | None = None
     debug: bool = False
 
 

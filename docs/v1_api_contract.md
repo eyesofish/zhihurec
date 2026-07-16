@@ -1,421 +1,243 @@
-# V1 API Contract
+# ZhihuRec API Contract
 
-## Purpose
-This document defines the minimal online API surface for the ZhihuRec-based closed-loop project.
+## Runtime data flow
 
-The contract sits on top of project-owned tables and offline-built assets, not on top of the raw ZhihuRec CSV files directly.
-
-Primary storage boundary:
-- relational tables in [v1_schema.sql](/D:/Github/zhihurec/sql/v1_schema.sql)
-- offline-derived bridge assets from [build_demo_world.py](/D:/Github/zhihurec/scripts/build_demo_world.py)
-
-Important raw-data limitation:
-- ZhihuRec does not expose raw question text, answer text, author names, or topic names.
-- Therefore `display_title`, `display_summary`, `display_name`, and `display_query` are synthetic demo fields built offline.
-- The internal semantic keys remain `answer_id`, `question_id`, `topic_id`, and `query_key`.
-
-## Runtime Data Flow
-`raw ZhihuRec CSVs`
--> `scripts/build_demo_world.py`
--> `answer/question/author/topic/query_topic_map/hot_answer_snapshot/user_profile seeds`
--> `MySQL tables`
--> `feed/search/event/profile APIs`
-
-## Endpoint Overview
-- `GET /feed`
-- `POST /search`
-- `POST /event/recommendation_click`
-- `POST /event/search_result_click`
-- `GET /debug/profile`
-
-## 1. `GET /feed`
-
-### Purpose
-Return the top answer cards for one demo user after combining:
-- dual-tower-style base recall or a future vector retrieval layer
-- topic-weight profile adjustment
-- recent-query topic boost
-- hot fallback if the main recall pool is too small
-
-### Request
-Query params:
-- `user_id` required
-- `page_size` optional, default `10`
-- `debug` optional, default `false`
-
-Example:
-```http
-GET /feed?user_id=123&page_size=10&debug=true
+```text
+raw ZhihuRec CSVs or compact fixture
+  -> scripts/build_demo_world.py / scripts/build_demo_fixture.py
+  -> scripts/import_demo_world.py
+  -> MySQL
+  -> FastAPI
 ```
 
-### Main storage touchpoints
-- `user_profile`
-- `answer`
-- `question`
-- `author`
-- `topic`
-- `answer_topic`
-- `hot_answer_snapshot`
-- future vector assets referenced by `answer.vector_key`
+Raw CSV files are never read by online endpoints. ZhihuRec does not contain public
+question/answer/author/topic text, so display strings remain synthetic while IDs retain
+their dataset semantics.
 
-### Response
+## `GET /feed`
+
+Query parameters:
+
+- `user_id` required;
+- `page_size` 1-50, default 10;
+- `debug` default false;
+- `experiment_arm`: `default`, `manual`, `manual_plus_als`, `lgb_plus_als`, or
+  `lgb_plus_als_plus_search`;
+- `include_sponsored` default true;
+- `request_id`: optional client idempotency key for one logical feed load;
+- `as_of_ts`: evaluation-only boundary for point-in-time popularity features.
+
+The default organic candidate set can contain:
+
+- `profile_topic`;
+- `recent_query_topic`;
+- `als_cf` using FAISS inner product;
+- `hot_or_fresh`.
+
+The default scorer uses a compatible LightGBM artifact when present and otherwise uses
+the manual score. Explicit LightGBM arms fail if the artifact schema is missing or
+incompatible; they never silently substitute the manual scorer.
+
+Example item:
+
 ```json
 {
-  "user_id": 123,
-  "request_id": "feed-20260417-001",
-  "items": [
-    {
-      "answer_id": 456,
-      "question_id": 321,
-      "question_title": "Question 321",
-      "answer_summary": "Synthetic answer summary for answer 456.",
-      "author": {
-        "author_id": 9001,
-        "display_name": "Author 9001"
-      },
-      "topics": [
-        {"topic_id": 12, "display_name": "Topic 12"}
-      ],
-      "selected_reason": "Selected because topic match and recent-query boost aligned.",
-      "scores": {
-        "base_recall_score": 0.812,
-        "personalized_topic_score": 0.161,
-        "default_topic_score": 0.029,
-        "topic_match_score": 0.174,
-        "query_recall_boost": 0.091,
-        "final_score": 1.077
-      },
-      "recall_sources": ["dual_tower"],
-      "is_fallback": false
-    }
+  "answer_id": 456,
+  "question_id": 321,
+  "question_title": "Synthetic question title",
+  "answer_summary": "Synthetic answer summary.",
+  "author": {
+    "author_id": 9001,
+    "display_name": "Author 9001"
+  },
+  "topics": [
+    {"topic_id": 12, "display_name": "Topic 12"}
   ],
-  "debug": {
-    "profile_summary": {
-      "behavior_score": 19.0,
-      "top_topics": [
-        {"topic_id": 12, "weight": 0.32}
-      ]
-    },
-    "recall_candidates": [
-      {
-        "answer_id": 456,
-        "source": "dual_tower",
-        "base_recall_score": 0.812
-      }
-    ],
-    "fallback_used": false,
-    "cold_start_mix": {
-      "alpha": 0.885443,
-      "behavior_score": 365.0,
-      "default_seed_key": "cold_start_default",
-      "default_topic_count": 10
-    }
+  "selected_reason": "Selected because its topics match the user profile.",
+  "scores": {
+    "base_recall_score": 0.4,
+    "personalized_topic_score": 0.2,
+    "default_topic_score": 0.1,
+    "topic_match_score": 0.18,
+    "query_recall_boost": 0.0,
+    "final_score": 0.58,
+    "sponsored_score": null
+  },
+  "recall_sources": ["profile_topic"],
+  "is_fallback": false,
+  "content_type": "organic",
+  "sponsored": null
+}
+```
+
+Sponsored items use the same answer-card fields and add:
+
+```json
+{
+  "content_type": "sponsored",
+  "recall_sources": ["sponsored"],
+  "sponsored": {
+    "delivery_id": "ad-...",
+    "campaign_id": 9001,
+    "creative_id": 19001,
+    "label": "Sponsored"
   }
 }
 ```
 
-### Notes
-- `items` should come from derived content tables, not directly from `data/zhihurec_1m/raw/*.csv`.
-- `question_title`, `answer_summary`, and `display_name` may remain synthetic in v1.
+The server reserves sponsored deliveries transactionally before responding. Eligibility
+checks active window, topic targeting, budget, pacing, frequency cap, and content
+availability. A 10-item page uses sponsored positions 3 and 8 when inventory is
+eligible. Organic evaluation calls set `include_sponsored=false`.
 
-## 2. `POST /search`
+With `debug=true`, the response includes:
 
-### Purpose
-Record a search intent signal and return a minimal answer result list through `query -> topic -> answer`.
+- selected experiment arm;
+- profile summary and cold-start mix;
+- up to 50 organic recall candidates;
+- sponsored candidate IDs, slots, score, and synthetic expected spend.
 
-### Request
+## `POST /search`
+
+Request:
+
 ```json
 {
-  "user_id": 123,
-  "query_key": "8481 8482",
-  "query_text": "Query 8481 8482",
+  "user_id": 7248,
+  "query_key": "248 12125",
+  "query_text": "optional display query",
   "page_size": 10,
   "debug": true
 }
 ```
 
-### Main storage touchpoints
-- `query_topic_map`
-- `answer`
-- `question`
-- `author`
-- `topic`
-- `answer_topic`
-- `user_profile` for writing `recent_queries`
-- `user_event` for `search_query`
+The backend resolves the query, records `search_query`, updates recent-query profile
+state in synchronous modes, retrieves topic-matched answers, and applies hot fallback.
+In `kafka_async`, profile mutation occurs in the consumer.
 
-### Behavior
-- write a `search_query` event
-- append the query to `user_profile.recent_queries`
-- look up related topics from `query_topic_map`
-- retrieve matching answers via topic relationships
-- return top results
+## `POST /event/track`
 
-### Response
+Unified product event request:
+
 ```json
 {
-  "user_id": 123,
-  "query_key": "8481 8482",
-  "items": [
-    {
-      "answer_id": 456,
-      "question_id": 321,
-      "question_title": "Question 321",
-      "answer_summary": "Synthetic answer summary for answer 456.",
-      "topics": [
-        {"topic_id": 12, "display_name": "Topic 12"}
-      ],
-      "scores": {
-        "topic_match_score": 0.81,
-        "hot_backfill_score": 0.00,
-        "final_score": 0.81
-      }
-    }
-  ],
-  "debug": {
-    "matched_topics": [
-      {"topic_id": 12, "score": 0.81, "rank": 1}
-    ],
-    "result_sources": [
-      {"answer_id": 456, "source": "topic_lookup"}
-    ]
-  }
-}
-```
-
-### Notes
-- `query_key` is the internal semantic key in v1.
-- `query_text` is optional display copy and may be synthetic.
-
-## 3. `POST /event/recommendation_click`
-
-### Purpose
-Write a feed-click event and update the user profile with answer topics.
-
-### Request
-```json
-{
-  "user_id": 123,
+  "event_id": "imp-7248:feed-request:456",
+  "user_id": 7248,
+  "event_type": "feed_impression",
+  "surface": "feed",
   "answer_id": 456,
-  "request_id": "feed-20260417-001",
-  "debug": true
+  "query_key": null,
+  "request_id": "feed-request",
+  "sponsored_delivery_id": null,
+  "dwell_ms": null,
+  "debug": false
 }
 ```
 
-### Main storage touchpoints
-- `user_event`
-- `answer`
-- `answer_topic`
-- `user_profile`
+Allowed event types:
 
-### Response
+- `feed_impression`;
+- `detail_view`;
+- `dwell`;
+- `upvote`;
+- `downvote`;
+- `share`;
+- `recommendation_click`;
+- `search_result_click`.
+
+All listed event types require `answer_id`; `search_result_click` also requires
+`query_key`, and `dwell` requires `dwell_ms` between 0 and 86,400,000. Frontend impression IDs are deterministic per
+`(user_id, request_id, answer_id)`, and `user_event.external_event_id` makes retries
+idempotent.
+
+Profile semantics:
+
+- recommendation click/upvote: answer-topic delta plus behavior delta;
+- search-result click: query and answer topics, with a stronger overlap delta;
+- impression/detail/dwell/downvote/share: log only.
+
+Sponsored event requests carry only `sponsored_delivery_id`; the server loads and
+validates campaign/creative facts from MySQL. A sponsored impression confirms the
+delivery, and a sponsored recommendation click updates its click counters.
+
+Response:
+
 ```json
 {
   "ok": true,
-  "event_type": "recommendation_click",
-  "debug": {
-    "updated_topics": [
-      {"topic_id": 12, "delta": 0.08}
-    ],
-    "recent_clicked_answers_tail": [
-      {"answer_id": 456, "click_ts": 1713399999}
-    ],
-    "behavior_score": 22.0
-  }
+  "event_type": "feed_impression",
+  "profile_updated": false,
+  "behavior_score": null
 }
 ```
 
-## 4. `POST /event/search_result_click`
+The legacy endpoints remain available:
 
-### Purpose
-Write a stronger confirmation event after search and update the profile with:
-- query-matched topics
-- answer-carried topics
-- stronger overlap contribution where both sets intersect
+- `POST /event/recommendation_click`;
+- `POST /event/search_result_click`.
 
-### Request
-```json
-{
-  "user_id": 123,
-  "answer_id": 456,
-  "query_key": "8481 8482",
-  "request_id": "search-20260417-001",
-  "debug": true
-}
-```
+They accept additive optional `event_id` and `sponsored_delivery_id` fields.
 
-### Main storage touchpoints
-- `user_event`
-- `query_topic_map`
-- `answer_topic`
-- `user_profile`
+## Read APIs
 
-### Response
-```json
-{
-  "ok": true,
-  "event_type": "search_result_click",
-  "debug": {
-    "query_topics": [
-      {"topic_id": 12, "score": 0.81}
-    ],
-    "answer_topics": [
-      {"topic_id": 12}
-    ],
-    "overlap_topics": [
-      {"topic_id": 12, "boost_type": "strong_confirm"}
-    ],
-    "behavior_score": 27.0
-  }
-}
-```
+### `GET /debug/profile`
 
-## 5. `GET /debug/profile`
+Returns the exact profile used by feed serving:
 
-### Purpose
-Expose the current v1 profile state for debugging and interviews.
-
-### Request
-Query params:
-- `user_id` required
-
-### Main storage touchpoints
-- `user_profile`
-- `system_profile_seed`
-- optionally recent `user_event`
-
-### Response
-```json
-{
-  "user_id": 123,
-  "cold_start_seed_key": "cold_start_default",
-  "behavior_score": 27.0,
-  "topic_weights": [
-    {"topic_id": 12, "weight": 0.32}
-  ],
-  "recent_clicked_answers": [
-    {"answer_id": 456, "click_ts": 1713399999}
-  ],
-  "recent_queries": [
-    {"query_key": "8481 8482", "query_ts": 1713399900}
-  ],
-  "vector_summary": {
-    "vector_key_count": 10,
-    "top_contributing_topics": [
-      {"topic_id": 12, "weight": 0.32}
-    ]
-  }
-}
-```
-
-## Product API (Reddit-Like Product Frontend)
-
-These endpoints back the React/Vite product frontend at `product-frontend/` (port 5174).
-The debug endpoints above remain available for the legacy debug console at port 5173.
+- topic weights;
+- recent clicked answers;
+- recent queries;
+- behavior score;
+- cold-start seed;
+- vector summary.
 
 ### `GET /personas`
-List all demo personas (rows in `app_user` with `is_demo_user = 1`), highest behavior_score first.
 
-Query params: `limit` (default 10, 1-50).
-
-Response:
-```json
-{
-  "items": [
-    {
-      "user_id": 7248,
-      "display_name": "User 7248",
-      "behavior_score": 365.0,
-      "top_topics": [{"topic_id": 46, "weight": 0.083333}]
-    }
-  ]
-}
-```
+Lists demo users from `app_user.is_demo_user = 1`.
 
 ### `GET /search/suggestions`
-Suggest natural-language queries derived from `query_topic_map`. The `query_key` is submit-ready and must be POSTed to `/search` unchanged.
 
-Query params: `limit` (default 12, 1-50).
-
-Response:
-```json
-{
-  "items": [
-    {"query_key": "248 12125", "label": "Query 248 12125", "topic_count": 5}
-  ]
-}
-```
-
-`label` uses `query_topic_map.display_query` when present and falls back to `Query {query_key}`.
+Returns display labels and submit-ready `query_key` values from `query_topic_map`.
 
 ### `GET /answers/{answer_id}`
-Return the answer card payload used by `/post/:answerId` in the product frontend.
 
-Response:
-```json
-{
-  "answer_id": 123,
-  "question_id": 456,
-  "question_title": "Question 456",
-  "answer_summary": "Synthetic answer summary for answer 123.",
-  "author": {"author_id": 9, "display_name": "Author 9"},
-  "topics": [{"topic_id": 46, "display_name": "Topic 46"}]
-}
-```
+Returns the product answer card or 404.
 
-Returns 404 if the `answer_id` is unknown.
+## System endpoints
 
-### `POST /event/track`
-Unified event sink used by Reddit-like interactions.
+### `GET /livez`
 
-Request:
-```json
-{
-  "user_id": 7248,
-  "event_type": "upvote",
-  "surface": "home_feed",
-  "answer_id": 123,
-  "query_key": null,
-  "request_id": "feed-...",
-  "dwell_ms": null,
-  "debug": true
-}
-```
+Process liveness only. It remains 200 when dependencies fail.
 
-Allowed `event_type` values:
-- `feed_impression`
-- `detail_view`
-- `dwell`
-- `upvote`
-- `downvote`
-- `share`
-- `recommendation_click`
-- `search_result_click`
+### `GET /readyz` and `GET /healthz`
 
-Profile-update rules:
-- `recommendation_click` → delegates to existing recommendation-click flow.
-- `search_result_click` → delegates to existing search-result-click flow (requires `query_key`).
-- `upvote` → same positive profile update as `recommendation_click`; written to `user_event` with `event_type = 'upvote'`.
-- `feed_impression`, `detail_view`, `dwell`, `downvote`, `share` → log-only (`user_event` insert only).
+Readiness endpoints. They return 503 when:
 
-Response:
-```json
-{
-  "ok": true,
-  "event_type": "upvote",
-  "profile_updated": true,
-  "behavior_score": 368.0
-}
-```
+- MySQL is missing or cannot answer `SELECT 1`;
+- Kafka mode is enabled and the broker/required topics are unavailable;
+- required worker heartbeats are stale or consumer lag is too high;
+- the outbox has dead rows, excessive backlog, or an over-age pending row.
 
-`profile_updated` is `false` and `behavior_score` is `null` for log-only events.
+The body contains per-dependency status and outbox counts.
 
-The legacy endpoints `POST /event/recommendation_click` and `POST /event/search_result_click` remain available unchanged for the debug frontend.
+### `GET /metrics`
 
-## Verification Checklist
-- `GET /feed` must read project-owned answers and profile state, not raw CSV rows.
-- `POST /search` must persist `search_query` intent and read `query_topic_map`.
-- Click endpoints must update `user_profile` and write `user_event`.
-- `GET /debug/profile` must expose the profile that the recommender actually uses.
-- `GET /personas` must return ≥ 1 row when `app_user.is_demo_user` is populated.
-- `POST /event/track` `upvote` must mutate `behavior_score` by `recommendation_click_behavior_delta`; log-only events must leave it unchanged.
+Prometheus text format for HTTP request count, latency, and errors. The consumer and
+outbox workers expose their own metrics on ports 9101 and 9102 by default.
+
+## Kafka event semantics
+
+`UserEventMessage` and `TrainingInteractionMessage` are schema version 2.
+
+- partition key: user ID;
+- raw-event identity: `event_id`;
+- profile mutation: idempotent in MySQL;
+- training interaction: inserted into `event_outbox` in the same transaction as consumer
+  state;
+- feed impression training message: exposure with `label = null`; the trainer assigns
+  the final label by reconciling later clicks with request/item identity;
+- poison messages: DLQ before offset commit;
+- transient failures: retry/backoff without offset commit.
+
+The system provides at-least-once delivery with idempotent boundaries, not end-to-end
+exactly-once processing.

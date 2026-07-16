@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.app.errors import IdempotencyConflictError
+from backend.app.events.schema import UserEventMessage
 from backend.app.repositories._utils import (
     json_text,
     parse_json,
@@ -10,6 +12,52 @@ from backend.app.repositories._utils import (
 )
 from backend.app.schemas.event import RecentClickedAnswer
 from backend.app.schemas.profile import ProfileTopicWeight
+
+
+def claim_event_id(connection: Any, event: UserEventMessage) -> bool:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO event_idempotency (
+              external_event_id,
+              payload_fingerprint,
+              user_id,
+              event_type
+            )
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+              external_event_id = VALUES(external_event_id)
+            """,
+            (
+                event.event_id,
+                event.idempotency_fingerprint,
+                event.user_id,
+                event.event_type,
+            ),
+        )
+        inserted = int(cursor.rowcount) == 1
+        if inserted:
+            return True
+        cursor.execute(
+            """
+            SELECT payload_fingerprint, user_id, event_type
+            FROM event_idempotency
+            WHERE external_event_id = %s
+            """,
+            (event.event_id,),
+        )
+        existing = cursor.fetchone()
+    if existing is None:
+        raise RuntimeError(f"idempotency claim disappeared: {event.event_id}")
+    if (
+        str(existing["payload_fingerprint"]) != event.idempotency_fingerprint
+        or int(existing["user_id"]) != event.user_id
+        or str(existing["event_type"]) != event.event_type
+    ):
+        raise IdempotencyConflictError(
+            f"event_id reused with conflicting payload: {event.event_id}"
+        )
+    return False
 
 
 def record_search_query(
@@ -94,6 +142,10 @@ def record_click_event(
     event_ts: int,
     topic_ids: list[int],
     external_event_id: str | None = None,
+    sponsored_delivery_id: str | None = None,
+    campaign_id: int | None = None,
+    creative_id: int | None = None,
+    dwell_ms: int | None = None,
 ) -> None:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -103,26 +155,37 @@ def record_click_event(
               user_id,
               event_type,
               answer_id,
+              sponsored_delivery_id,
+              campaign_id,
+              creative_id,
               query_key,
               query_tokens_json,
               topic_ids_json,
               surface,
               request_id,
+              dwell_ms,
               source_confidence,
               event_ts
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'confirmed', %s)
+            VALUES (
+              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+              %s, 'confirmed', %s
+            )
             """,
             (
                 external_event_id,
                 user_id,
                 event_type,
                 answer_id,
+                sponsored_delivery_id,
+                campaign_id,
+                creative_id,
                 query_key,
                 json_text(query_tokens(query_key)) if query_key else None,
                 json_text(topic_ids),
                 surface,
                 request_id,
+                dwell_ms,
                 event_ts,
             ),
         )
@@ -139,7 +202,11 @@ def record_log_only_event(
     event_ts: int,
     debug_payload_json: str | None,
     external_event_id: str | None = None,
-) -> None:
+    sponsored_delivery_id: str | None = None,
+    campaign_id: int | None = None,
+    creative_id: int | None = None,
+    dwell_ms: int | None = None,
+) -> bool:
     """Insert a user_event row without mutating user_profile.
 
     Used by Reddit-like Product events (feed_impression, detail_view, dwell, downvote, share)
@@ -153,45 +220,43 @@ def record_log_only_event(
               user_id,
               event_type,
               answer_id,
+              sponsored_delivery_id,
+              campaign_id,
+              creative_id,
               query_key,
               query_tokens_json,
               topic_ids_json,
               surface,
               request_id,
+              dwell_ms,
               source_confidence,
               event_ts,
               debug_payload_json
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'not_applicable', %s, %s)
+            VALUES (
+              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+              %s, 'not_applicable', %s, %s
+            )
             """,
             (
                 external_event_id,
                 user_id,
                 event_type,
                 answer_id,
+                sponsored_delivery_id,
+                campaign_id,
+                creative_id,
                 query_key,
                 json_text(query_tokens(query_key)) if query_key else None,
                 None,
                 surface,
                 request_id,
+                dwell_ms,
                 event_ts,
                 debug_payload_json,
             ),
         )
-
-
-def has_external_event_id(connection: Any, external_event_id: str) -> bool:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT event_id
-            FROM user_event
-            WHERE external_event_id = %s
-            LIMIT 1
-            """,
-            (external_event_id,),
-        )
-        return cursor.fetchone() is not None
+        return True
 
 
 def apply_click_profile_update(

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import Field, model_validator
+
 from .common import ApiModel
 
 EventTrackType = Literal[
@@ -17,14 +19,36 @@ EventTrackType = Literal[
 
 
 class EventTrackRequest(ApiModel):
+    event_id: str | None = None
     user_id: int
     event_type: EventTrackType
     surface: str
     answer_id: int | None = None
     query_key: str | None = None
     request_id: str | None = None
-    dwell_ms: int | None = None
+    sponsored_delivery_id: str | None = None
+    dwell_ms: int | None = Field(None, ge=0, le=86_400_000)
     debug: bool = False
+
+    @model_validator(mode="after")
+    def validate_event_fields(self) -> EventTrackRequest:
+        answer_required = {
+            "feed_impression",
+            "detail_view",
+            "dwell",
+            "upvote",
+            "downvote",
+            "share",
+            "recommendation_click",
+            "search_result_click",
+        }
+        if self.event_type in answer_required and self.answer_id is None:
+            raise ValueError(f"{self.event_type} requires answer_id")
+        if self.event_type == "search_result_click" and not self.query_key:
+            raise ValueError("search_result_click requires query_key")
+        if self.event_type == "dwell" and self.dwell_ms is None:
+            raise ValueError("dwell requires dwell_ms")
+        return self
 
 
 class EventTrackResponse(ApiModel):

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.app.dependencies import get_product_service
+from backend.app.errors import IdempotencyConflictError
 from backend.app.schemas.event_track import EventTrackRequest, EventTrackResponse
 from backend.app.services.product import ProductService
 
@@ -16,5 +17,7 @@ def track_event(
 ) -> EventTrackResponse:
     try:
         return service.record_tracked_event(payload)
+    except IdempotencyConflictError:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

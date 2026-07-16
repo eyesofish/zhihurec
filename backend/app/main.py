@@ -1,12 +1,27 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+import logging
+import time
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.app.config import get_settings
-from backend.app.errors import RepositoryNotReadyError, UnresolvedQueryError
+from backend.app.errors import (
+    IdempotencyConflictError,
+    RepositoryNotReadyError,
+    UnresolvedQueryError,
+)
 from backend.app.events.publisher import EventPublishError
+from backend.app.observability import (
+    HTTP_REQUEST_DURATION,
+    HTTP_REQUESTS,
+    configure_logging,
+)
 from backend.app.routers.answers import router as answers_router
 from backend.app.routers.debug import router as debug_router
 from backend.app.routers.event import router as event_router
@@ -17,22 +32,83 @@ from backend.app.routers.personas import router as personas_router
 from backend.app.routers.search import router as search_router
 from backend.app.routers.suggestions import router as suggestions_router
 
+logger = logging.getLogger(__name__)
+
+
+def metric_path(request: Request) -> str:
+    route = request.scope.get("route")
+    return str(getattr(route, "path", "__unmatched__"))
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    try:
+        from backend.app.repositories.ranker import load_model
+
+        load_model()
+    except FileNotFoundError:
+        pass
+    yield
+
 
 def create_app() -> FastAPI:
+    configure_logging()
     settings = get_settings()
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        summary="ZhihuRec V1 backend skeleton",
+        summary="ZhihuRec recommendation-serving and event-pipeline prototype",
+        lifespan=lifespan,
     )
 
-    @app.on_event("startup")
-    async def _preload_ranker() -> None:
+    @app.middleware("http")
+    async def observe_request(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        request_id = request.headers.get("X-Request-ID") or f"req-{uuid.uuid4().hex}"
+        started = time.perf_counter()
         try:
-            from backend.app.repositories.ranker import load_model
-            load_model()
-        except FileNotFoundError:
-            pass  # model not trained yet — fall back to manual scoring
+            response = await call_next(request)
+        except Exception:
+            path = metric_path(request)
+            duration = time.perf_counter() - started
+            HTTP_REQUESTS.labels(
+                method=request.method,
+                path=path,
+                status="500",
+            ).inc()
+            HTTP_REQUEST_DURATION.labels(method=request.method, path=path).observe(duration)
+            logger.exception(
+                "http request failed",
+                extra={
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": path,
+                    "duration_ms": round(duration * 1000, 3),
+                },
+            )
+            raise
+        path = metric_path(request)
+        duration = time.perf_counter() - started
+        HTTP_REQUESTS.labels(
+            method=request.method,
+            path=path,
+            status=str(response.status_code),
+        ).inc()
+        HTTP_REQUEST_DURATION.labels(method=request.method, path=path).observe(duration)
+        response.headers["X-Request-ID"] = request_id
+        logger.info(
+            "http request complete",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": path,
+                "status": response.status_code,
+                "duration_ms": round(duration * 1000, 3),
+            },
+        )
+        return response
 
     app.add_middleware(
         CORSMiddleware,
@@ -82,6 +158,20 @@ def create_app() -> FastAPI:
             content={
                 "detail": str(exc),
                 "error_code": "event_publish_failed",
+                "path": request.url.path,
+            },
+        )
+
+    @app.exception_handler(IdempotencyConflictError)
+    async def idempotency_conflict_handler(
+        request: Request,
+        exc: IdempotencyConflictError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": str(exc),
+                "error_code": "idempotency_conflict",
                 "path": request.url.path,
             },
         )

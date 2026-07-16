@@ -7,9 +7,14 @@ param(
     [int]$FrontendPort = 5173,
     [int]$ProductFrontendPort = 5174,
     [int]$MysqlHealthTimeoutSeconds = 120,
+    [int]$ConsumerMetricsPort = 9101,
+    [int]$OutboxMetricsPort = 9102,
     [switch]$SkipBackend,
     [switch]$SkipFrontend,
     [switch]$ProductFrontend,
+    [switch]$WithKafka,
+    [ValidateSet('kafka_dual_write', 'kafka_async')]
+    [string]$EventMode = 'kafka_dual_write',
     [switch]$SmokeTest
 )
 
@@ -61,6 +66,26 @@ function Wait-MysqlHealthy {
     } while ((Get-Date) -lt $deadline)
 
     throw "MySQL did not become healthy within $TimeoutSeconds seconds"
+}
+
+function Wait-KafkaHealthy {
+    param([int]$TimeoutSeconds)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $status = (& docker inspect -f '{{.State.Health.Status}}' zhihurec-kafka 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            $status = ''
+        }
+        if ($status -eq 'healthy') {
+            Write-Host '  Kafka is healthy' -ForegroundColor Green
+            return
+        }
+        Write-Host "  kafka health: $status"
+        Start-Sleep -Seconds 3
+    } while ((Get-Date) -lt $deadline)
+
+    throw "Kafka did not become healthy within $TimeoutSeconds seconds"
 }
 
 function Start-LocalService {
@@ -180,8 +205,22 @@ Write-Step '[2/6] Starting MySQL via docker compose'
 Invoke-External -FilePath 'docker' -Arguments @('compose', 'up', '-d') -Label 'docker compose up'
 Wait-MysqlHealthy -TimeoutSeconds $MysqlHealthTimeoutSeconds
 
+if ($WithKafka) {
+    Write-Step '[2.5/6] Starting Kafka via docker compose'
+    Invoke-External `
+        -FilePath 'docker' `
+        -Arguments @('compose', '-f', 'docker-compose.kafka.yml', 'up', '-d') `
+        -Label 'docker compose kafka up'
+    Wait-KafkaHealthy -TimeoutSeconds $MysqlHealthTimeoutSeconds
+    $env:ZHIHUREC_EVENT_MODE = $EventMode
+    $env:ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS = '127.0.0.1:9092'
+} else {
+    $env:ZHIHUREC_EVENT_MODE = 'sync_mysql'
+}
+
 Write-Step '[3/6] Setting ZHIHUREC_DATABASE_URL for child processes'
 $env:ZHIHUREC_DATABASE_URL = $DatabaseUrl
+$env:ZHIHUREC_SPONSORED_ENABLED = '1'
 
 Write-Step '[4/6] Applying schema and demo seed'
 Invoke-External -FilePath $Python -Arguments @('scripts\apply_demo_mysql.py') -Label 'apply_demo_mysql.py'
@@ -198,6 +237,17 @@ try {
             -Port $BackendPort
     }
 
+    if ($WithKafka) {
+        Start-LocalService `
+            -Name 'outbox' `
+            -Arguments @('scripts\run_outbox_publisher.py') `
+            -Port $OutboxMetricsPort
+        Start-LocalService `
+            -Name 'consumer' `
+            -Arguments @('scripts\run_profile_consumer.py') `
+            -Port $ConsumerMetricsPort
+    }
+
     if (-not $SkipFrontend) {
         Start-LocalService `
             -Name 'frontend' `
@@ -209,7 +259,12 @@ try {
         $pfDir = Join-Path $repoRoot 'product-frontend'
         if (-not (Test-Path (Join-Path $pfDir 'node_modules'))) {
             Write-Step 'Installing product frontend dependencies'
-            Invoke-External -FilePath 'npm' -Arguments @('install') -Label 'npm install'
+            Push-Location $pfDir
+            try {
+                Invoke-External -FilePath 'npm' -Arguments @('ci') -Label 'npm ci'
+            } finally {
+                Pop-Location
+            }
         }
 
         if (Test-ListeningPort -Port $ProductFrontendPort) {
@@ -254,6 +309,10 @@ try {
         Write-Host "  repository_backend=$($health.repository_backend)"
         Wait-JsonEndpoint -Name 'Debug profile' -Url "http://127.0.0.1:$BackendPort/debug/profile?user_id=7248" | Out-Null
         Wait-JsonEndpoint -Name 'Debug feed' -Url "http://127.0.0.1:$BackendPort/feed?user_id=7248&page_size=10&debug=true" | Out-Null
+        Invoke-External `
+            -FilePath $Python `
+            -Arguments @('scripts\smoke_local.py', '--base-url', "http://127.0.0.1:$BackendPort") `
+            -Label 'smoke_local.py'
     }
 
     if (-not $SkipFrontend) {
@@ -281,9 +340,13 @@ try {
         Write-Host 'Smoke test passed. Stopping backend/frontend started by this script.' -ForegroundColor Green
     } else {
         Write-Host 'Press Ctrl+C to stop backend/frontend. MySQL is left running; use docker compose down to stop it.' -ForegroundColor Yellow
-        $ids = @($startedProcesses | ForEach-Object { $_.Process.Id })
-        if ($ids.Count -gt 0) {
-            Wait-Process -Id $ids
+        while ($startedProcesses.Count -gt 0) {
+            foreach ($entry in $startedProcesses) {
+                if ($entry.Process.HasExited) {
+                    throw "$($entry.Name) exited with code $($entry.Process.ExitCode). See $($entry.Stderr)."
+                }
+            }
+            Start-Sleep -Seconds 2
         }
     }
 } finally {

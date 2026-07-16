@@ -2,12 +2,12 @@ from __future__ import annotations
 
 
 class RepositoryNotReadyError(RuntimeError):
-    """Raised when the backend skeleton has not been wired to MySQL yet."""
+    """Raised when an online operation has no configured runtime repository."""
 
     def __init__(self, operation: str) -> None:
         super().__init__(
-            f"MySQL runtime repository is not wired for `{operation}` yet. "
-            "The backend skeleton is live, but SQL-backed handlers are the next step."
+            f"MySQL runtime repository is unavailable for `{operation}`. "
+            "Configure ZHIHUREC_DATABASE_URL and wait for readiness."
         )
         self.operation = operation
 
@@ -18,3 +18,7 @@ class UnresolvedQueryError(ValueError):
     def __init__(self, query_input: str) -> None:
         super().__init__("No matching query found. Try a suggested query.")
         self.query_input = query_input
+
+
+class IdempotencyConflictError(ValueError):
+    """Raised when one event ID is reused for different semantic payloads."""

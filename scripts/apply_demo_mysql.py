@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -19,12 +21,20 @@ class MysqlUrl:
 
 
 def parse_args() -> argparse.Namespace:
+    seed_dir = os.getenv("ZHIHUREC_DEMO_SEED_DIR", "build/demo_world")
     parser = argparse.ArgumentParser(
         description="Apply ZhihuRec V1 schema and demo seed SQL to MySQL."
     )
     parser.add_argument("--schema-sql", default="sql/v1_schema.sql", help="Schema SQL file.")
     parser.add_argument(
-        "--seed-sql", default="build/demo_world/import_demo_world.sql", help="Seed SQL file."
+        "--seed-sql",
+        default=f"{seed_dir}/import_demo_world.sql",
+        help="Seed SQL file.",
+    )
+    parser.add_argument(
+        "--fixture-dir",
+        default="build/demo_fixture",
+        help="Generated compact fixture directory used when --seed-sql is missing.",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Only verify inputs and print the target."
@@ -99,6 +109,7 @@ def connect(config: MysqlUrl):
         port=config.port,
         user=config.user,
         password=config.password,
+        database=config.database,
         charset="utf8mb4",
         autocommit=True,
     )
@@ -117,10 +128,45 @@ def apply_sql_file(connection, sql_path: Path) -> int:
     return len(statements)
 
 
+def prepare_seed_sql(seed_sql: Path, fixture_dir: Path) -> Path:
+    if seed_sql.exists():
+        return seed_sql
+
+    fixture_seed_sql = fixture_dir / "import_demo_world.sql"
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "build_demo_fixture.py"),
+            "--output-dir",
+            str(fixture_dir),
+        ],
+        check=True,
+        cwd=ROOT,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "import_demo_world.py"),
+            "--input-dir",
+            str(fixture_dir),
+            "--output-sql",
+            str(fixture_seed_sql),
+            "--truncate-first",
+        ],
+        check=True,
+        cwd=ROOT,
+    )
+    print(f"seed SQL not found at {seed_sql}; using compact fixture {fixture_seed_sql}")
+    return fixture_seed_sql
+
+
 def main() -> None:
     args = parse_args()
     schema_sql = repo_path(args.schema_sql)
     seed_sql = repo_path(args.seed_sql)
+    fixture_dir = repo_path(args.fixture_dir)
+    if not args.dry_run:
+        seed_sql = prepare_seed_sql(seed_sql, fixture_dir)
     missing = [path for path in (schema_sql, seed_sql) if not path.exists()]
     if missing:
         for path in missing:

@@ -1,75 +1,138 @@
-# ZhihuRec V1
+# ZhihuRec
 
-End-to-end **search↔recommendation closed-loop** demo on the [THUIR ZhihuRec 1M](http://www.thuir.cn/group/~YQLiu/datasets/ZhihuRec.zip) dataset. FastAPI + MySQL + a minimal static debug frontend. Built around the hypothesis that a user's transition from feed to search is a high-intent state signal that should feed back into recommendation recall.
+Local search-to-recommendation feedback-loop prototype built on the
+[THUIR ZhihuRec 1M](http://www.thuir.cn/group/~YQLiu/datasets/ZhihuRec.zip)
+dataset. The project connects offline data preparation, FastAPI/MySQL serving,
+multi-source recall, event-driven profile updates, React explainability, optional Kafka,
+and a small sponsored-candidate lane.
 
-Headline result: **Search Carryover Gain@10 = +0.1000** on 121 replay events (baseline 0.9000 → replay 1.0000). Evidence and methodology: `docs/v1_metrics.md`.
+## Current evidence
 
-> 中文项目说明: `plan/project_brief_zh.md` is the canonical V1 boundary document.
+The corrected evaluation is item-impression-aware, chronological, and isolated per
+persona/request. Latest verified results are stored in `docs/metrics/latest.json`.
 
-## One-command bootstrap
+- Aggregate Search Carryover Gain@10: `-0.0200` across 60 search events and three
+  personas (`0.4167 -> 0.3967`). User 7248 improved, while users 1026 and 3343
+  regressed; search carryover is documented as an unstable intervention, not a win.
+- Best current organic Recall@10 arm: LightGBM + cutoff-safe ALS, `0.0761`; NDCG@10
+  `0.0437`.
+- Adding the current search path reduced that arm to Recall@10 `0.0326`.
+- The LightGBM pointwise prototype has finite held-out metrics (`ROC AUC 0.5942`), but
+  absolute ranking quality remains low.
 
-```powershell
-.\scripts\init_local.ps1 -SmokeTest
+## One-command local bootstrap
+
+macOS/Linux:
+
+```bash
+PYTHON=.venv/bin/python scripts/init_local.sh --product-frontend
 ```
 
-This brings up a dockerised MySQL, applies schema + demo seed, resets the demo user, runs the smoke pipeline against `/healthz`, `/debug/profile`, `/feed?debug=true`, and the static frontend, then stops cleanly. Full step-by-step manual flow: `docs/v1_local_runbook.md`.
-
-## ECS273 demo path
-
-Use this path for the implementation submission and live demo:
+Windows PowerShell:
 
 ```powershell
-# Fast non-interactive check
-.\scripts\init_local.ps1 -SmokeTest
-
-# Full demo with the React product frontend
 .\scripts\init_local.ps1 -ProductFrontend
 ```
 
-Open `http://127.0.0.1:5174` for the product demo. The walkthrough is: choose a persona, inspect the feed, run a search from the top bar, click a search result or upvote a feed item, then watch the right-rail Profile Debug panel update. The advanced visualization is the D3 topic-weight bar chart in `product-frontend/src/components/TopicWeightChart.tsx`; it renders real `/debug/profile` data and refreshes after search, click, and upvote events.
+Add `--with-kafka` on Bash or `-WithKafka` on PowerShell to start Kafka, the profile
+consumer, and the transactional-outbox publisher. Add `--smoke-test` or `-SmokeTest`
+for a non-interactive verification run.
 
-For evaluation, cite the compact summary in `docs/v1_metrics.md`: `Search Carryover Gain@10 = +0.1000`; the historical V1 item-ranking baseline was `Recall@10 = 0.0000`, `NDCG@10 = 0.0000`, and observed `candidate_recall@50 = 0.1579`; the current V1.5 live rerun with ML/collaborative artifacts present produced `Recall@10 = 0.0833`, `NDCG@10 = 0.0315`, and observed `candidate_recall@50 = 0.1667`. This supports the honest V1.5 story: search intent visibly affects topic-level feed alignment, and lightweight ML/recall prototypes are promising but still need isolated ablations before becoming the main claim.
+If the ignored full `build/demo_world` pack is absent, `scripts/apply_demo_mysql.py`
+generates a compact deterministic three-persona fixture automatically. The full
+ZhihuRec-derived world can be rebuilt with:
 
-## Where to read next
-
-| You are... | Read this |
-|---|---|
-| **Resuming work on this project** | `plan/zhihurec-v1-gap-checklist/README.md` — the canonical "what's left" tracker, with a copy-pastable resume prompt at the bottom |
-| **Trying to understand the V1 boundary** | `plan/project_brief_zh.md` §14 / §18 (Chinese) |
-| **Looking for the architecture** | `docs/v1_api_contract.md` for the API surface; `backend/app/repositories/mysql.py` for the SQL recall path |
-| **Data analysis & evidence** | `docs/data_analysis_report.md` (7 sections, 12 figures), `docs/hci_report.md`, `docs/v1_metrics.md` |
-| **Planning the V2 Kafka/ML upgrade** | `plan/zhihurec-v2-kafka-upgrade/README.md` — Kafka event stream, async profile updates, training-sample sink, and a path toward stronger retrieval/ranking |
-
-## Tech stack
-
-- **Backend**: Python 3.13, FastAPI, PyMySQL (no ORM)
-- **Storage**: MySQL 8.0 (via `docker compose`, the only online source of truth)
-- **Frontend (debug)**: vanilla HTML/CSS/JS served by `python -m http.server` on port 5173
-- **Frontend (product)**: React 18 + TypeScript 5.6 + Vite 5.4 + D3.js on port 5174 - Reddit-inspired product demo (`product-frontend/`)
-- **Offline tooling**: `scripts/build_demo_world.py`, `scripts/replay_demo_events.py`, `scripts/eval_replay_metrics.py`, `scripts/eda.py`
-
-## Non-goals (by design — see `plan/project_brief_zh.md` §14)
-
-V1 explicitly does **not** ship: Redis, message queues, authentication, JWT, multi-user state, microservices, container deployment of the app itself (only MySQL is containerised), heavy frontend framework, or full deep-learning recall / ranking. Kafka-backed event streaming and async profile updates are planned as V2 work in `plan/zhihurec-v2-kafka-upgrade/`.
-
-## Development
-
-```powershell
-# Install dev deps
-python -m pip install -r backend\requirements-dev.txt
-
-# Run tests (default — no MySQL required)
-python -m pytest -v
-
-# Run tests with MySQL backend (requires docker compose up + ZHIHUREC_DATABASE_URL)
-python -m pytest -v -m mysql
-
-# Lint and format
-python -m ruff check backend\ scripts\ tests\
-python -m ruff format backend\ scripts\ tests\
-
-# Type-check
-python -m mypy
+```bash
+python scripts/build_demo_world.py
+python scripts/import_demo_world.py --truncate-first
 ```
 
-Quality infrastructure details: `plan/zhihurec-v1-quality-upgrade/README.md`.
+## Architecture
+
+```text
+ZhihuRec raw logs
+  -> demo-world builder
+  -> MySQL serving and event tables
+  -> feed/search/event APIs
+  -> profile mutation
+  -> next-feed recall and ranking
+
+optional Kafka:
+API/DB transaction -> event_outbox -> raw topic
+raw topic -> idempotent profile consumer -> MySQL + training outbox
+training outbox -> training topic
+```
+
+Feed recall sources:
+
+- profile topics;
+- recent-search topics;
+- ALS/FAISS inner-product candidates;
+- hot/fresh fallback.
+
+The default product path uses a compatible LightGBM artifact when available and falls
+back to the explainable manual formula. Debug evaluation arms isolate manual, ALS,
+LightGBM, and search-signal effects.
+
+## Sponsored lane
+
+The feed can insert at most two explicitly labeled sponsored cards at positions 3 and 8.
+Eligibility covers active window, topic targeting, daily budget, even/asap pacing, and
+per-user frequency cap. Candidate score is:
+
+```text
+bid_micros * predicted_ctr * quality_score
+```
+
+The delivery ledger records synthetic expected spend per served impression as
+`bid_micros * predicted_ctr`. This is an interview/demo abstraction, not an auction,
+billing, attribution, calibration, or revenue system. Sponsored items are excluded from
+organic model evaluation.
+
+## Runtime modes
+
+| Mode | Behavior |
+|---|---|
+| `sync_mysql` | Default local mode; event/profile changes commit synchronously in MySQL. |
+| `kafka_dual_write` | MySQL mutation and raw-event outbox row commit atomically; worker publishes later. |
+| `kafka_async` | API durably stages the raw event in MySQL Outbox; consumer applies profile state asynchronously. |
+
+All profile mutation paths lock the per-user profile row. Kafka processing is
+at-least-once with event identity, duplicate-safe profile mutation, a DLQ, retry/backoff,
+and a durable training-message outbox. It is not end-to-end exactly-once.
+
+## Health and observability
+
+- `/livez`: process liveness;
+- `/readyz` and `/healthz`: MySQL, required Kafka topics, and outbox readiness;
+- `/metrics`: Prometheus-format HTTP metrics;
+- worker metric ports: consumer `9101`, outbox `9102`;
+- structured JSON request, retry, and failure logs.
+
+## Read next
+
+| Topic | Document |
+|---|---|
+| API and event contract | `docs/v1_api_contract.md` |
+| Current metrics and methodology | `docs/v1_metrics.md` |
+| Machine-readable evidence | `docs/metrics/latest.json` |
+| Local operations | `docs/v1_local_runbook.md` |
+| Data analysis | `docs/data_analysis_report.md` |
+| Product/HCI walkthrough | `docs/hci_report.md` |
+| Original project boundary | `plan/project_brief_zh.md` |
+
+## Development gates
+
+```bash
+python -m pip install -r backend/requirements-dev.txt
+python -m ruff check backend scripts tests
+python -m mypy
+python -m pytest -q
+
+cd product-frontend
+npm ci
+npm test -- --run
+npm run build
+```
+
+MySQL and Kafka integration layers run in `.github/workflows/ci.yml`.

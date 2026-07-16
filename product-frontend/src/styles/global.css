@@ -328,6 +328,16 @@ button {
   margin-bottom: 6px;
 }
 
+.zr-card__sponsored {
+  border: 1px solid #b8a56a;
+  border-radius: 999px;
+  color: #7a641c;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  text-transform: uppercase;
+}
+
 .zr-card__community {
   display: inline-flex;
   align-items: center;

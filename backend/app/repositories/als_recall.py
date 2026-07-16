@@ -8,32 +8,48 @@ should fall back to content-based recall channels.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 
 
 class ALSRecall:
-    def __init__(self, build_dir: str = "build") -> None:
-        base = Path(build_dir)
+    def __init__(self, build_dir: str | None = None) -> None:
+        base = Path(build_dir or os.getenv("ZHIHUREC_MODEL_DIR") or "build")
         self._index_path = base / "faiss_index.bin"
         self._user_emb_path = base / "als_user_embeddings.npy"
         self._item_emb_path = base / "als_item_embeddings.npy"
         self._user_map_path = base / "als_user_id_map.json"
         self._item_map_path = base / "als_item_id_map.json"
+        self._meta_path = base / "als_meta.json"
 
         self._user_id_map: dict[int, int] = {}
         self._index_to_item: dict[int, int] = {}
         self._loaded = False
+        self._signature: tuple[int, ...] | None = None
+        self._metadata: dict[str, object] = {}
 
     def _ensure_loaded(self) -> None:
-        if self._loaded:
-            return
-        if not self._index_path.exists():
+        required_paths = (
+            self._index_path,
+            self._user_emb_path,
+            self._item_emb_path,
+            self._user_map_path,
+            self._item_map_path,
+            self._meta_path,
+        )
+        if not all(path.exists() for path in required_paths):
             return  # not trained yet — all calls become no-ops
+        signature = tuple(path.stat().st_mtime_ns for path in required_paths)
+        if self._loaded and self._signature == signature:
+            return
 
         import faiss
 
+        metadata = json.loads(self._meta_path.read_text(encoding="utf-8"))
+        if metadata.get("similarity") != "inner_product":
+            return
         self._index = faiss.read_index(str(self._index_path))
         self._user_embeddings = np.load(str(self._user_emb_path))
         self._item_embeddings = np.load(str(self._item_emb_path))
@@ -45,14 +61,20 @@ class ALSRecall:
         item_data = json.loads(self._item_map_path.read_text(encoding="utf-8"))
         self._index_to_item = {i: int(aid) for i, aid in enumerate(item_data["index_to_id"])}
 
+        self._metadata = metadata
+        self._signature = signature
         self._loaded = True
+
+    def metadata(self) -> dict[str, object]:
+        self._ensure_loaded()
+        return dict(self._metadata)
 
     def get_candidates(
         self,
         user_id: int,
         k: int = 200,
     ) -> list[tuple[int, float]]:
-        """Return top-k (answer_id, similarity_score) for user.
+        """Return top-k `(answer_id, inner_product_score)` pairs for a user.
 
         Returns empty list for cold users or when ALS artifacts haven't been built.
         """
@@ -77,7 +99,7 @@ class ALSRecall:
 _ALS: ALSRecall | None = None
 
 
-def get_als_recall(build_dir: str = "build") -> ALSRecall:
+def get_als_recall(build_dir: str | None = None) -> ALSRecall:
     global _ALS
     if _ALS is None:
         _ALS = ALSRecall(build_dir)

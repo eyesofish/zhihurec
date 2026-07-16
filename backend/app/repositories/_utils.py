@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import Any
 
 from backend.app.schemas.event import UpdatedTopicDelta
@@ -131,7 +132,7 @@ def topic_delta_models(topic_deltas: dict[int, float]) -> list[UpdatedTopicDelta
 
 
 def new_request_id(prefix: str, operation: str) -> str:
-    return f"{prefix}-{operation}-{int(time.time() * 1000)}"
+    return f"{prefix}-{operation}-{int(time.time() * 1000)}-{uuid.uuid4().hex}"
 
 
 def updated_topic_weights(

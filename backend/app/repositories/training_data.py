@@ -1,25 +1,38 @@
-"""Extract (features, label) samples from MySQL for LightGBM ranking.
-
-Usage (from scripts/):
-    from backend.app.repositories.training_data import extract_training_samples
-    train_df, test_df = extract_training_samples(connection)
-"""
+"""Build exposure-aware, event-time-correct LightGBM training samples."""
 
 from __future__ import annotations
 
+import json
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
 
 from backend.app.config import Settings, compute_alpha
+from backend.app.repositories._utils import updated_topic_weights
 from backend.app.repositories.content_dao import load_topics_by_answer
-from backend.app.repositories.profile_dao import (
-    fetch_profile_row,
-    load_default_seed_topic_weights,
-    load_recent_query_topic_scores,
-    profile_from_row,
-)
+from backend.app.repositories.profile_dao import load_default_seed_topic_weights
+from backend.app.repositories.ranker import RANKER_FEATURE_COLUMNS, build_feature_dict
+
+TRAINING_METADATA_COLUMNS = ("user_id", "answer_id", "request_id", "event_ts")
+POSITIVE_EVENT_TYPES = {"recommendation_click", "search_result_click", "upvote"}
+REPLAY_EVENT_TYPES = {
+    "search_query",
+    "feed_impression",
+    "recommendation_click",
+    "search_result_click",
+    "upvote",
+    "downvote",
+}
+
+
+@dataclass
+class ReplayProfileState:
+    topic_weights: list[dict[str, float | int]] = field(default_factory=list)
+    recent_queries: list[tuple[str, int]] = field(default_factory=list)
+    behavior_score: float = 0.0
 
 
 def extract_training_samples(
@@ -27,224 +40,414 @@ def extract_training_samples(
     settings: Settings,
     *,
     train_ratio: float = 0.8,
-    neg_ratio: float = 4.0,
-    seed: int = 42,
+    attribution_window_seconds: int = 14_400,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (train_df, test_df) with feature columns and a 'label' column (0/1).
+    """Return chronological train/test frames built only from real impressions.
 
-    Positive samples: click events (recommendation_click, search_result_click).
-    Negative samples: random answers not clicked by the same user, sampled at
-    neg_ratio x positives.
+    One sample corresponds to one item-level `feed_impression`. A later positive
+    event with the same `(user_id, request_id, answer_id)` turns that exposure
+    into a positive label. Features are computed before the impression and any
+    later click mutate replay state.
     """
-    rng = np.random.default_rng(seed)
+    if not 0 < train_ratio < 1:
+        raise ValueError("train_ratio must be between 0 and 1")
+    if attribution_window_seconds <= 0:
+        raise ValueError("attribution_window_seconds must be positive")
 
-    # ── positive samples ──────────────────────────────────────────
-    with connection.cursor() as cur:
-        cur.execute(
-            """
+    events = _load_events(connection)
+    impressions = [event for event in events if event["event_type"] == "feed_impression"]
+    if not impressions:
+        raise RuntimeError(
+            "No item-level feed_impression events found. Rebuild/import the demo world "
+            "or use the product frontend before training."
+        )
+    if not any(event.get("request_id") for event in impressions):
+        raise RuntimeError("Impression events require request_id for exposure attribution.")
+
+    answer_ids = sorted(
+        {int(event["answer_id"]) for event in events if event.get("answer_id") is not None}
+    )
+    answer_rows, topic_ids_by_answer = _load_answer_context(connection, answer_ids)
+    query_topic_scores = _load_query_topic_scores(connection)
+    initial_profile_states = _load_initial_profile_states(settings)
+    default_topic_weights = load_default_seed_topic_weights(
+        connection,
+        seed_key=(
+            "evaluation_empty" if initial_profile_states else settings.cold_start_default_seed_key
+        ),
+    )
+    positive_times = _positive_click_times(events)
+
+    rows = _build_sample_rows(
+        events=events,
+        positive_times=positive_times,
+        answer_rows=answer_rows,
+        topic_ids_by_answer=topic_ids_by_answer,
+        query_topic_scores=query_topic_scores,
+        default_topic_weights=default_topic_weights,
+        settings=settings,
+        attribution_window_seconds=attribution_window_seconds,
+        initial_profile_states=initial_profile_states,
+    )
+    if not rows:
+        raise RuntimeError("No attributable impression samples were produced.")
+
+    samples = pd.DataFrame(rows)
+    train_df, test_df = _split_by_request(samples, train_ratio=train_ratio)
+    _validate_label_support(train_df, "train")
+    _validate_label_support(test_df, "test")
+
+    summary = {
+        "events_total": len(events),
+        "impressions_total": len(impressions),
+        "samples_total": len(samples),
+        "users": int(samples["user_id"].nunique()),
+        "train_requests": int(train_df["request_id"].nunique()),
+        "test_requests": int(test_df["request_id"].nunique()),
+        "train_positive": int((train_df["label"] == 1).sum()),
+        "train_negative": int((train_df["label"] == 0).sum()),
+        "test_positive": int((test_df["label"] == 1).sum()),
+        "test_negative": int((test_df["label"] == 0).sum()),
+    }
+    train_df.attrs["summary"] = summary
+    test_df.attrs["summary"] = summary
+    return train_df.reset_index(drop=True), test_df.reset_index(drop=True)
+
+
+def _load_events(connection: Any) -> list[dict[str, Any]]:
+    event_types = sorted(REPLAY_EVENT_TYPES)
+    placeholders = ",".join(["%s"] * len(event_types))
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
             SELECT
-              ue.user_id,
-              ue.answer_id,
-              ue.event_type,
-              ue.event_ts,
-              ue.query_key
-            FROM user_event ue
-            WHERE ue.event_type IN ('recommendation_click', 'search_result_click')
-              AND ue.answer_id IS NOT NULL
-            ORDER BY ue.event_ts ASC
-            """
+              event_id,
+              external_event_id,
+              user_id,
+              event_type,
+              answer_id,
+              query_key,
+              request_id,
+              event_ts
+            FROM user_event
+            WHERE event_type IN ({placeholders})
+            ORDER BY event_ts ASC, event_id ASC
+            """,
+            tuple(event_types),
         )
-        pos_rows = cur.fetchall()
+        rows = list(cursor.fetchall())
+    priority = {"search_query": 0, "feed_impression": 1}
+    return sorted(
+        rows,
+        key=lambda row: (
+            int(row["event_ts"]),
+            priority.get(str(row["event_type"]), 2),
+            int(row["event_id"]),
+        ),
+    )
 
-    if not pos_rows:
-        raise RuntimeError("No click events found in user_event — cannot build training data.")
 
-    # ── collect all user_ids and answer_ids for negative sampling ──
-    all_user_ids = sorted({int(r["user_id"]) for r in pos_rows})
-
-    with connection.cursor() as cur:
-        cur.execute("SELECT answer_id FROM answer")
-        all_answer_ids = sorted(int(r["answer_id"]) for r in cur.fetchall())
-
-    if not all_answer_ids:
-        raise RuntimeError("No answers found in answer table.")
-
-    # ── per-user clicked sets for negative exclusion ──────────────
-    user_pos_answers: dict[int, set[int]] = {}
-    for r in pos_rows:
-        uid = int(r["user_id"])
-        aid = int(r["answer_id"])
-        user_pos_answers.setdefault(uid, set()).add(aid)
-
-    # ── build rows ────────────────────────────────────────────────
-    rows: list[dict[str, Any]] = []
-
-    for r in pos_rows:
-        rows.append(
-            {
-                "user_id": int(r["user_id"]),
-                "answer_id": int(r["answer_id"]),
-                "event_ts": int(r["event_ts"]),
-                "query_key": r.get("query_key") or "",
-                "label": 1,
-            }
-        )
-
-    # negative samples
-    for uid in all_user_ids:
-        clicked = user_pos_answers.get(uid, set())
-        eligible = [aid for aid in all_answer_ids if aid not in clicked]
-        n_neg = min(int(len(clicked) * neg_ratio), len(eligible))
-        if n_neg <= 0:
+def _positive_click_times(
+    events: list[dict[str, Any]],
+) -> dict[tuple[int, str, int], list[int]]:
+    positive_times: dict[tuple[int, str, int], list[int]] = defaultdict(list)
+    for event in events:
+        if event["event_type"] not in POSITIVE_EVENT_TYPES:
             continue
-        neg_ids = rng.choice(eligible, size=n_neg, replace=False)
-        for aid in neg_ids:
-            rows.append(
-                {
-                    "user_id": uid,
-                    "answer_id": int(aid),
-                    "event_ts": 0,
-                    "query_key": "",
-                    "label": 0,
-                }
-            )
-
-    df = pd.DataFrame(rows)
-
-    # ── time split ────────────────────────────────────────────────
-    pos_df = df[df["label"] == 1]
-    neg_df = df[df["label"] == 0]
-    cutoff_idx = int(len(pos_df) * train_ratio)
-    cutoff_ts = int(pos_df.iloc[cutoff_idx]["event_ts"]) if cutoff_idx < len(pos_df) else int(pos_df.iloc[-1]["event_ts"])
-    pos_train = pos_df[pos_df["event_ts"] <= cutoff_ts]
-    pos_test = pos_df[pos_df["event_ts"] > cutoff_ts]
-    train_df = pd.concat([pos_train, neg_df]).sample(frac=1, random_state=seed).reset_index(drop=True)
-    test_df = pos_test.copy().reset_index(drop=True)
-
-    # ── join item features ────────────────────────────────────────
-    train_df = _join_features(connection, settings, train_df)
-    if len(test_df) > 0:
-        test_df = _join_features(connection, settings, test_df)
-
-    return train_df, test_df
+        if event.get("answer_id") is None or not event.get("request_id"):
+            continue
+        key = (
+            int(event["user_id"]),
+            str(event["request_id"]),
+            int(event["answer_id"]),
+        )
+        positive_times[key].append(int(event["event_ts"]))
+    return positive_times
 
 
-def _join_features(
+def _load_answer_context(
     connection: Any,
-    settings: Settings,
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-    """Left-join per-row user-profile and answer features onto df."""
-    if df.empty:
-        return df
-
-    user_ids = sorted(df["user_id"].unique())
-    answer_ids = sorted(df["answer_id"].unique())
-
-    # ── answer rows + author ─────────────────────────────────────
-    with connection.cursor() as cur:
-        placeholders = ",".join(["%s"] * len(answer_ids))
-        cur.execute(
+    answer_ids: list[int],
+) -> tuple[dict[int, dict[str, Any]], dict[int, set[int]]]:
+    if not answer_ids:
+        return {}, {}
+    placeholders = ",".join(["%s"] * len(answer_ids))
+    with connection.cursor() as cursor:
+        cursor.execute(
             f"""
             SELECT
               a.answer_id,
-              a.hot_score,
-              a.click_count,
-              a.impression_count,
+              a.create_ts,
               a.has_picture,
               a.has_video,
               a.is_high_value,
               a.is_editor_recommended,
-              a.create_ts,
-              a.thanks_count,
-              a.likes_count,
-              a.comment_count,
-              a.collection_count,
-              au.is_excellent_answerer,
-              au.follower_count AS author_follower_count
+              au.is_excellent_answerer
             FROM answer a
             LEFT JOIN author au ON au.author_id = a.author_id
             WHERE a.answer_id IN ({placeholders})
             """,
             tuple(answer_ids),
         )
-        answer_map = {int(r["answer_id"]): r for r in cur.fetchall()}
+        answer_rows = {int(row["answer_id"]): row for row in cursor.fetchall()}
 
-    # ── user profiles (one query per user — demo scale) ──────────
-    profile_cache: dict[int, dict[str, Any]] = {}
-    for uid in user_ids:
-        row = fetch_profile_row(connection, uid)
-        profile = profile_from_row(row)
-        topic_weight_map = {t.topic_id: t.weight for t in profile.topic_weights}
-        query_topic_scores = load_recent_query_topic_scores(connection, profile.recent_queries)
-        default_seed_key = profile.cold_start_seed_key or settings.cold_start_default_seed_key
-        default_map = load_default_seed_topic_weights(connection, seed_key=default_seed_key)
-        alpha = compute_alpha(profile.behavior_score, settings)
-        profile_cache[uid] = {
-            "behavior_score": profile.behavior_score,
-            "topic_weight_map": topic_weight_map,
-            "query_topic_scores": query_topic_scores,
-            "default_map": default_map,
-            "alpha": alpha,
-            "topic_count": len(topic_weight_map),
-        }
-
-    # ── topic lookup (batch) ──────────────────────────────────────
     topics_by_answer = load_topics_by_answer(connection, answer_ids)
+    topic_ids_by_answer = {
+        answer_id: {topic.topic_id for topic in topics}
+        for answer_id, topics in topics_by_answer.items()
+    }
+    return answer_rows, topic_ids_by_answer
 
-    # ── compute per-row features ──────────────────────────────────
-    now_ts = int(pd.Timestamp.now().timestamp())
-    features_list: list[dict[str, Any]] = []
-    for _, row in df.iterrows():
-        uid = int(row["user_id"])
-        aid = int(row["answer_id"])
-        p = profile_cache.get(uid, {})
-        ans = answer_map.get(aid, {})
-        topic_ids = {t.topic_id for t in topics_by_answer.get(aid, [])}
 
-        twm = p.get("topic_weight_map", {})
-        dm = p.get("default_map", {})
-        qs = p.get("query_topic_scores", {})
-        alpha = float(p.get("alpha", 0.5))
+def _load_query_topic_scores(
+    connection: Any,
+) -> dict[str, dict[int, float]]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT query_key, topic_id, score
+            FROM query_topic_map
+            ORDER BY query_key, match_rank ASC
+            """
+        )
+        rows = cursor.fetchall()
+    result: dict[str, dict[int, float]] = defaultdict(dict)
+    for row in rows:
+        query_key = str(row["query_key"])
+        topic_id = int(row["topic_id"])
+        result[query_key][topic_id] = max(
+            result[query_key].get(topic_id, 0.0),
+            float(row.get("score") or 0.0),
+        )
+    return dict(result)
 
-        personalized = sum(twm.get(tid, 0.0) for tid in topic_ids)
-        default_ts = sum(dm.get(tid, 0.0) for tid in topic_ids)
-        topic_match = alpha * personalized + (1.0 - alpha) * default_ts
-        query_boost = sum(qs.get(tid, 0.0) for tid in topic_ids)
 
-        create_ts = int(ans.get("create_ts") or 0)
-        age_hours = (now_ts - create_ts) / 3600.0 if create_ts > 0 else 0.0
+def _current_query_scores(
+    state: ReplayProfileState,
+    query_topic_scores: dict[str, dict[int, float]],
+) -> dict[int, float]:
+    scores: dict[int, float] = {}
+    for query_key, _ in state.recent_queries:
+        for topic_id, score in query_topic_scores.get(query_key, {}).items():
+            scores[topic_id] = max(scores.get(topic_id, 0.0), score)
+    return scores
 
-        features_list.append(
-            {
-                "base_score": 0.0,  # populated below after max calc
-                "personalized_topic_score": round(personalized, 6),
-                "default_topic_score": round(default_ts, 6),
-                "topic_match_score": round(topic_match, 6),
-                "query_recall_boost": round(query_boost, 6),
-                "user_behavior_score": float(p.get("behavior_score", 0.0)),
-                "user_topic_count": int(p.get("topic_count", 0)),
-                "answer_hot_score": float(ans.get("hot_score") or 0.0),
-                "answer_click_count": int(ans.get("click_count") or 0),
-                "answer_impression_count": int(ans.get("impression_count") or 0),
-                "answer_age_hours": round(age_hours, 2),
-                "answer_has_picture": int(ans.get("has_picture") or 0),
-                "answer_has_video": int(ans.get("has_video") or 0),
-                "answer_is_high_value": int(ans.get("is_high_value") or 0),
-                "answer_is_editor_recommended": int(ans.get("is_editor_recommended") or 0),
-                "answer_likes_count": int(ans.get("likes_count") or 0),
-                "answer_collection_count": int(ans.get("collection_count") or 0),
-                "author_is_excellent_answerer": int(ans.get("is_excellent_answerer") or 0),
-                "author_follower_count": float(ans.get("author_follower_count") or 0.0),
-                "label": int(row["label"]),
+
+def _load_initial_profile_states(
+    settings: Settings,
+) -> dict[int, ReplayProfileState]:
+    path = Path(settings.demo_seed_dir) / "evaluation_persona_profile_seeds.json"
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        raise RuntimeError(f"{path} must contain a JSON list")
+    states: dict[int, ReplayProfileState] = {}
+    for seed in payload:
+        states[int(seed["user_id"])] = ReplayProfileState(
+            topic_weights=list(seed.get("topic_weights", [])),
+            recent_queries=[
+                (str(row["query_key"]), int(row.get("query_ts") or 0))
+                for row in seed.get("recent_queries", [])
+                if row.get("query_key")
+            ],
+            behavior_score=float(seed.get("behavior_score") or 0.0),
+        )
+    return states
+
+
+def _build_sample_rows(
+    *,
+    events: list[dict[str, Any]],
+    positive_times: dict[tuple[int, str, int], list[int]],
+    answer_rows: dict[int, dict[str, Any]],
+    topic_ids_by_answer: dict[int, set[int]],
+    query_topic_scores: dict[str, dict[int, float]],
+    default_topic_weights: dict[int, float],
+    settings: Settings,
+    attribution_window_seconds: int,
+    initial_profile_states: dict[int, ReplayProfileState] | None = None,
+) -> list[dict[str, Any]]:
+    profile_states: dict[int, ReplayProfileState] = defaultdict(ReplayProfileState)
+    for user_id, state in (initial_profile_states or {}).items():
+        profile_states[user_id] = ReplayProfileState(
+            topic_weights=list(state.topic_weights),
+            recent_queries=list(state.recent_queries),
+            behavior_score=state.behavior_score,
+        )
+    answer_impressions: Counter[int] = Counter()
+    answer_clicks: Counter[int] = Counter()
+    sample_rows: list[dict[str, Any]] = []
+
+    for event in events:
+        user_id = int(event["user_id"])
+        event_type = str(event["event_type"])
+        event_ts = int(event["event_ts"])
+        state = profile_states[user_id]
+
+        if event_type == "search_query":
+            query_key = str(event.get("query_key") or "")
+            if query_key:
+                state.recent_queries = [
+                    (query_key, event_ts),
+                    *[item for item in state.recent_queries if item[0] != query_key],
+                ][:5]
+                state.behavior_score += settings.search_query_behavior_delta
+            continue
+
+        answer_id_value = event.get("answer_id")
+        if answer_id_value is None:
+            continue
+        answer_id = int(answer_id_value)
+        topic_ids = topic_ids_by_answer.get(answer_id, set())
+
+        if event_type == "feed_impression":
+            request_id = str(event.get("request_id") or "")
+            if not request_id or answer_id not in answer_rows:
+                continue
+            key = (user_id, request_id, answer_id)
+            attributed_clicks = [
+                click_ts
+                for click_ts in positive_times.get(key, [])
+                if event_ts <= click_ts <= event_ts + attribution_window_seconds
+            ]
+            outcome_ts = min(attributed_clicks) if attributed_clicks else None
+            label = int(outcome_ts is not None)
+            topic_weight_map = {
+                int(row["topic_id"]): float(row["weight"]) for row in state.topic_weights
             }
+            current_query_scores = _current_query_scores(state, query_topic_scores)
+            alpha = compute_alpha(state.behavior_score, settings)
+            current_hot = float(answer_clicks[answer_id] * 10 + answer_impressions[answer_id])
+            max_hot = max(
+                [
+                    float(clicks * 10 + answer_impressions[aid])
+                    for aid, clicks in answer_clicks.items()
+                ]
+                + [float(value) for value in answer_impressions.values()]
+                + [1.0]
+            )
+            features = build_feature_dict(
+                answer_row=answer_rows[answer_id],
+                topic_ids=topic_ids,
+                topic_weight_map=topic_weight_map,
+                default_topic_weight_map=default_topic_weights,
+                query_topic_scores=current_query_scores,
+                alpha=alpha,
+                max_hot_score=max_hot,
+                now_ts=float(event_ts),
+                user_behavior_score=state.behavior_score,
+                user_topic_count=len(topic_weight_map),
+                answer_hot_score=current_hot,
+                answer_click_count=answer_clicks[answer_id],
+                answer_impression_count=answer_impressions[answer_id],
+            )
+            sample_rows.append(
+                {
+                    "user_id": user_id,
+                    "answer_id": answer_id,
+                    "request_id": request_id,
+                    "event_ts": event_ts,
+                    "outcome_ts": outcome_ts,
+                    **features,
+                    "label": label,
+                }
+            )
+            answer_impressions[answer_id] += 1
+            continue
+
+        if event_type in POSITIVE_EVENT_TYPES:
+            _apply_positive_event(
+                state=state,
+                event=event,
+                topic_ids=topic_ids,
+                query_topic_scores=query_topic_scores,
+                settings=settings,
+            )
+            answer_clicks[answer_id] += 1
+
+    return sample_rows
+
+
+def _apply_positive_event(
+    *,
+    state: ReplayProfileState,
+    event: dict[str, Any],
+    topic_ids: set[int],
+    query_topic_scores: dict[str, dict[int, float]],
+    settings: Settings,
+) -> None:
+    event_type = str(event["event_type"])
+    if event_type == "search_result_click":
+        query_key = str(event.get("query_key") or "")
+        query_topic_ids = set(query_topic_scores.get(query_key, {}))
+        overlap = query_topic_ids & topic_ids
+        deltas = {
+            topic_id: settings.search_result_click_topic_delta
+            for topic_id in query_topic_ids | topic_ids
+        }
+        for topic_id in overlap:
+            deltas[topic_id] = settings.search_result_overlap_topic_delta
+        behavior_delta = settings.search_result_click_behavior_delta
+    else:
+        deltas = {topic_id: settings.recommendation_click_topic_delta for topic_id in topic_ids}
+        behavior_delta = settings.recommendation_click_behavior_delta
+
+    state.topic_weights = updated_topic_weights(
+        state.topic_weights,
+        deltas,
+        settings.profile_topic_decay,
+    )
+    state.behavior_score += behavior_delta
+
+
+def _split_by_request(
+    samples: pd.DataFrame,
+    *,
+    train_ratio: float,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    train_indices: list[int] = []
+    test_indices: list[int] = []
+
+    for _, user_rows in samples.groupby("user_id", sort=True):
+        request_order = (
+            user_rows.groupby("request_id", sort=False)["event_ts"].min().sort_values(kind="stable")
+        )
+        requests = list(request_order.index)
+        if len(requests) < 2:
+            train_indices.extend(user_rows.index.tolist())
+            continue
+        cutoff = round(len(requests) * train_ratio)
+        cutoff = max(1, min(cutoff, len(requests) - 1))
+        train_requests = set(requests[:cutoff])
+        test_start_ts = int(request_order.loc[requests[cutoff]])
+        train_mask = user_rows["request_id"].isin(train_requests)
+        train_rows = user_rows[train_mask]
+        if "outcome_ts" in train_rows:
+            censored = train_rows["outcome_ts"].notna() & (
+                train_rows["outcome_ts"] >= test_start_ts
+            )
+            train_rows = train_rows[~censored]
+        train_indices.extend(train_rows.index.tolist())
+        test_indices.extend(user_rows[~train_mask].index.tolist())
+
+    train_df = samples.loc[sorted(train_indices)].copy()
+    test_df = samples.loc[sorted(test_indices)].copy()
+    if test_df.empty:
+        raise RuntimeError("Chronological request split produced an empty test set.")
+    return (
+        train_df.drop(columns=["outcome_ts"], errors="ignore"),
+        test_df.drop(columns=["outcome_ts"], errors="ignore"),
+    )
+
+
+def _validate_label_support(frame: pd.DataFrame, split_name: str) -> None:
+    counts = frame["label"].value_counts().to_dict()
+    if set(int(value) for value in counts) != {0, 1}:
+        raise RuntimeError(
+            f"{split_name} split must contain positive and negative labels; got {counts}"
         )
 
-    result = pd.DataFrame(features_list)
 
-    # normalize base_score per group
-    max_hot = result["answer_hot_score"].max()
-    if max_hot > 0:
-        result["base_score"] = result["answer_hot_score"] / max_hot
-
-    return result
+def feature_columns() -> list[str]:
+    return list(RANKER_FEATURE_COLUMNS)

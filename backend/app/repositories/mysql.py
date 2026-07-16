@@ -4,12 +4,7 @@ import time
 from typing import Any, cast
 
 from backend.app.config import Settings, compute_alpha
-from backend.app.events.publisher import (
-    EventPublisher,
-    EventPublishError,
-    build_event_publisher,
-    log_dual_write_failure,
-)
+from backend.app.events.outbox import enqueue_outbox_message
 from backend.app.events.schema import UserEventMessage, UserEventType
 from backend.app.repositories._utils import (
     add_feed_candidate,
@@ -21,8 +16,10 @@ from backend.app.repositories._utils import (
 )
 from backend.app.repositories.als_recall import get_als_recall
 from backend.app.repositories.base import RuntimeRepository
-from backend.app.repositories.connection import connect, parse_database_url
+from backend.app.repositories.connection import MysqlConnectionPool, parse_database_url
 from backend.app.repositories.content_dao import (
+    load_answer_event_counts_as_of,
+    load_answer_ids_created_as_of,
     load_answer_ids_for_topics,
     load_answer_rows,
     load_answer_topic_ids,
@@ -35,6 +32,7 @@ from backend.app.repositories.content_dao import (
 from backend.app.repositories.event_dao import (
     append_recent_query,
     apply_click_profile_update,
+    claim_event_id,
     record_click_event,
     record_log_only_event,
     record_search_query,
@@ -46,7 +44,25 @@ from backend.app.repositories.profile_dao import (
     profile_from_row,
 )
 from backend.app.repositories.query_resolver import resolve_query_key
-from backend.app.repositories.ranker import build_feature_dict, score_candidates
+from backend.app.repositories.ranker import (
+    build_feature_dict,
+    loaded_model_metadata,
+    score_candidates,
+)
+from backend.app.repositories.sponsored import (
+    blend_fixed_slots,
+    sponsored_slot_is_reachable,
+)
+from backend.app.repositories.sponsored_dao import (
+    SponsoredDelivery,
+    claim_feed_request,
+    confirm_sponsored_impression,
+    load_sponsored_attribution,
+    load_sponsored_candidates,
+    load_sponsored_deliveries_for_request,
+    record_sponsored_click,
+    reserve_sponsored_delivery,
+)
 from backend.app.schemas.answer import AnswerCardResponse
 from backend.app.schemas.common import AuthorCard, TopicCard
 from backend.app.schemas.event import (
@@ -61,13 +77,17 @@ from backend.app.schemas.event import (
 )
 from backend.app.schemas.event_track import EventTrackRequest, EventTrackResponse
 from backend.app.schemas.feed import (
+    ArtifactDebug,
     ColdStartMix,
     FeedDebugPayload,
+    FeedExperimentArm,
     FeedItem,
     FeedItemScores,
     FeedProfileSummary,
     FeedResponse,
     RecallCandidateDebug,
+    SponsoredCandidateDebug,
+    SponsoredFeedMetadata,
 )
 from backend.app.schemas.persona import PersonaCard, PersonaListResponse
 from backend.app.schemas.profile import DebugProfileResponse
@@ -88,23 +108,74 @@ class MysqlRuntimeRepository(RuntimeRepository):
     def __init__(
         self,
         settings: Settings,
-        event_publisher: EventPublisher | None = None,
     ) -> None:
         if not settings.database_url.strip():
             raise ValueError("ZHIHUREC_DATABASE_URL is required for MysqlRuntimeRepository")
         self._settings = settings
         self._connection_config = parse_database_url(settings.database_url)
-        self._event_publisher = event_publisher or build_event_publisher(settings)
+        self._connection_pool = MysqlConnectionPool(
+            self._connection_config,
+            connect_timeout=settings.mysql_connect_timeout_seconds,
+            read_timeout=settings.mysql_read_timeout_seconds,
+            write_timeout=settings.mysql_write_timeout_seconds,
+            min_cached=settings.mysql_pool_min_cached,
+            max_cached=settings.mysql_pool_max_cached,
+            max_connections=settings.mysql_pool_max_connections,
+        )
 
     # ── public API ──────────────────────────────────────────────
 
-    def get_feed(self, user_id: int, page_size: int, debug: bool) -> FeedResponse:
-        connection = connect(self._connection_config)
+    def close(self) -> None:
+        self._connection_pool.close()
+
+    def get_feed(
+        self,
+        user_id: int,
+        page_size: int,
+        debug: bool,
+        experiment_arm: FeedExperimentArm = "default",
+        include_sponsored: bool = True,
+        request_id: str | None = None,
+        as_of_ts: int | None = None,
+    ) -> FeedResponse:
+        request_id = request_id or new_request_id(self._settings.request_id_prefix, "feed")
+        sponsored_enabled = (
+            self._settings.sponsored_enabled and include_sponsored and experiment_arm == "default"
+        )
+        connection = self._connection_pool.connect()
+        transaction_started = True
         try:
+            connection.begin()
+            new_feed_request = claim_feed_request(
+                connection,
+                request_id=request_id,
+                user_id=user_id,
+                page_size=page_size,
+                debug=debug,
+                include_sponsored=include_sponsored,
+                experiment_arm=experiment_arm,
+                as_of_ts=as_of_ts,
+            )
             profile_row = fetch_profile_row(connection, user_id)
             profile = profile_from_row(profile_row)
             topic_weight_map = {item.topic_id: item.weight for item in profile.topic_weights}
-            query_topic_scores = load_recent_query_topic_scores(connection, profile.recent_queries)
+            use_search = experiment_arm in {"default", "lgb_plus_als_plus_search"}
+            use_lgb = experiment_arm in {
+                "default",
+                "lgb_plus_als",
+                "lgb_plus_als_plus_search",
+            }
+            require_lgb = experiment_arm in {"lgb_plus_als", "lgb_plus_als_plus_search"}
+            use_als = (
+                self._settings.als_recall_enabled
+                if experiment_arm == "default"
+                else experiment_arm != "manual"
+            )
+            query_topic_scores = (
+                load_recent_query_topic_scores(connection, profile.recent_queries)
+                if use_search
+                else {}
+            )
             default_seed_key = (
                 profile.cold_start_seed_key or self._settings.cold_start_default_seed_key
             )
@@ -126,18 +197,25 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 query_topic_scores=query_topic_scores,
                 page_size=page_size,
                 user_id=user_id,
+                use_als=use_als,
+                as_of_ts=as_of_ts,
             )
             if not candidates:
+                if transaction_started:
+                    connection.commit()
                 return FeedResponse(
                     user_id=user_id,
-                    request_id=new_request_id(self._settings.request_id_prefix, "feed"),
+                    request_id=request_id,
                     items=[],
                     debug=FeedDebugPayload(
+                        experiment_arm=experiment_arm,
                         profile_summary=FeedProfileSummary(
                             behavior_score=profile.behavior_score,
                             top_topics=profile.topic_weights,
                         ),
                         recall_candidates=[],
+                        sponsored_candidates=[],
+                        artifacts=self._artifact_debug(),
                         fallback_used=False,
                         cold_start_mix=cold_start_mix,
                     )
@@ -147,12 +225,33 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
             answer_ids = list(candidates)
             answer_rows = load_answer_rows(connection, answer_ids)
+            if as_of_ts is not None:
+                event_counts = load_answer_event_counts_as_of(
+                    connection,
+                    answer_ids,
+                    as_of_ts=as_of_ts,
+                )
+                answer_rows = {
+                    answer_id: {
+                        **row,
+                        **event_counts.get(
+                            answer_id,
+                            {
+                                "hot_score": 0.0,
+                                "click_count": 0,
+                                "impression_count": 0,
+                            },
+                        ),
+                    }
+                    for answer_id, row in answer_rows.items()
+                }
             topics_by_answer = load_topics_by_answer(connection, answer_ids)
             max_hot_score = max(
                 [float(row.get("hot_score") or 0) for row in answer_rows.values()] + [1.0]
             )
 
-            now_ts = time.time()
+            now_ts = int(time.time())
+            feature_now_ts = as_of_ts if as_of_ts is not None else now_ts
             user_topic_count = len(topic_weight_map)
 
             # ── build feature dicts for all candidates ────────────────
@@ -164,10 +263,15 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     continue
                 topics = topics_by_answer.get(answer_id, [])
                 topic_ids = {topic.topic_id for topic in topics}
-                base_score = round(
-                    float(row.get("hot_score") or candidate["raw_base_score"] or 0) / max_hot_score,
-                    6,
-                ) if max_hot_score > 0 else 0.0
+                base_score = (
+                    round(
+                        float(row.get("hot_score") or candidate["raw_base_score"] or 0)
+                        / max_hot_score,
+                        6,
+                    )
+                    if max_hot_score > 0
+                    else 0.0
+                )
                 feat = build_feature_dict(
                     answer_row=row,
                     topic_ids=topic_ids,
@@ -176,22 +280,41 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     query_topic_scores=query_topic_scores,
                     alpha=alpha,
                     max_hot_score=max_hot_score,
-                    now_ts=now_ts,
+                    now_ts=float(feature_now_ts),
                     user_behavior_score=profile.behavior_score,
                     user_topic_count=user_topic_count,
                 )
                 feature_dicts.append(feat)
                 candidate_keys.append(
-                    (answer_id, row, topics, topic_ids, base_score,
-                     sorted(candidate["sources"]), bool(candidate["is_fallback"]))
+                    (
+                        answer_id,
+                        row,
+                        topics,
+                        topic_ids,
+                        base_score,
+                        sorted(candidate["sources"]),
+                        bool(candidate["is_fallback"]),
+                    )
                 )
 
             # ── batch model inference ─────────────────────────────────
-            model_scores = score_candidates(feature_dicts) if feature_dicts else None
+            model_scores = score_candidates(feature_dicts) if feature_dicts and use_lgb else None
+            if require_lgb and model_scores is None:
+                raise RuntimeError(
+                    "requested LightGBM experiment arm but a compatible model is unavailable"
+                )
 
             # ── build FeedItem list ────────────────────────────────────
             scored_items: list[tuple[FeedItem, RecallCandidateDebug]] = []
-            for idx, (answer_id, row, topics, topic_ids, base_score, sources, is_fallback) in enumerate(candidate_keys):
+            for idx, (
+                answer_id,
+                row,
+                topics,
+                topic_ids,
+                base_score,
+                sources,
+                is_fallback,
+            ) in enumerate(candidate_keys):
                 row = cast(dict[str, Any], row)
                 personalized_topic_score = round(
                     sum(topic_weight_map.get(tid, 0.0) for tid in topic_ids), 6
@@ -251,59 +374,164 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 )
 
             scored_items.sort(key=lambda pair: (-pair[0].scores.final_score, pair[0].answer_id))
-            selected_pairs = scored_items[:page_size]
-            selected_items = [pair[0] for pair in selected_pairs]
-            fallback_used = any(item.is_fallback for item in selected_items)
+            sponsored_deliveries: list[SponsoredDelivery] = []
+            if sponsored_enabled:
+                if not new_feed_request:
+                    sponsored_deliveries = load_sponsored_deliveries_for_request(
+                        connection,
+                        request_id=request_id,
+                        user_id=user_id,
+                    )
+                else:
+                    target_topic_ids = list(
+                        dict.fromkeys(
+                            [
+                                *topic_weight_map,
+                                *query_topic_scores,
+                                *default_topic_weight_map,
+                            ]
+                        )
+                    )
+                    sponsored_candidates = load_sponsored_candidates(
+                        connection,
+                        user_id=user_id,
+                        target_topic_ids=target_topic_ids,
+                        now_ts=now_ts,
+                    )
+                    slots = sorted(
+                        {slot for slot in self._settings.sponsored_slots if 1 <= slot <= page_size}
+                    )
+                    used_answers: set[int] = set()
+                    used_campaigns: set[int] = set()
+                    candidate_index = 0
+                    organic_answer_ids = {pair[0].answer_id for pair in scored_items}
+                    for slot in slots:
+                        while candidate_index < len(sponsored_candidates):
+                            sponsored_candidate = sponsored_candidates[candidate_index]
+                            candidate_index += 1
+                            if (
+                                sponsored_candidate.answer_id in used_answers
+                                or sponsored_candidate.campaign_id in used_campaigns
+                            ):
+                                continue
+                            if not sponsored_slot_is_reachable(
+                                organic_answer_ids=organic_answer_ids,
+                                already_sponsored_answer_ids=used_answers,
+                                candidate_answer_id=sponsored_candidate.answer_id,
+                                slot_position=slot,
+                                sponsored_count=len(sponsored_deliveries),
+                            ):
+                                continue
+                            delivery = reserve_sponsored_delivery(
+                                connection,
+                                candidate=sponsored_candidate,
+                                user_id=user_id,
+                                request_id=request_id,
+                                slot_position=slot,
+                                now_ts=now_ts,
+                                pacing_headroom_seconds=(
+                                    self._settings.sponsored_pacing_headroom_seconds
+                                ),
+                            )
+                            if delivery is None:
+                                continue
+                            sponsored_deliveries.append(delivery)
+                            used_answers.add(delivery.answer_id)
+                            used_campaigns.add(delivery.campaign_id)
+                            break
+
+            sponsored_items, sponsored_debug = self._build_sponsored_feed_items(
+                connection,
+                sponsored_deliveries,
+            )
+            sponsored_answer_ids = {item.answer_id for item in sponsored_items}
+            organic_pairs = [
+                pair for pair in scored_items if pair[0].answer_id not in sponsored_answer_ids
+            ]
+            organic_limit = max(0, page_size - len(sponsored_items))
+            selected_pairs = organic_pairs[:organic_limit]
+            organic_items = [pair[0] for pair in selected_pairs]
+            selected_items = blend_fixed_slots(
+                organic_items,
+                {
+                    delivery.slot_position: item
+                    for delivery, item in zip(
+                        sponsored_deliveries,
+                        sponsored_items,
+                        strict=True,
+                    )
+                },
+                page_size=page_size,
+            )
+            fallback_used = any(item.is_fallback for item in organic_items)
+            if transaction_started:
+                connection.commit()
 
             return FeedResponse(
                 user_id=user_id,
-                request_id=new_request_id(self._settings.request_id_prefix, "feed"),
+                request_id=request_id,
                 items=selected_items,
                 debug=FeedDebugPayload(
+                    experiment_arm=experiment_arm,
                     profile_summary=FeedProfileSummary(
                         behavior_score=profile.behavior_score,
                         top_topics=profile.topic_weights,
                     ),
                     recall_candidates=[pair[1] for pair in scored_items[:50]],
+                    sponsored_candidates=sponsored_debug,
+                    artifacts=self._artifact_debug(),
                     fallback_used=fallback_used,
                     cold_start_mix=cold_start_mix,
                 )
                 if debug
                 else None,
             )
+        except Exception:
+            if transaction_started:
+                connection.rollback()
+            raise
         finally:
             connection.close()
 
     def search(self, payload: SearchRequest) -> SearchResponse:
         event_ts = int(time.time())
-        connection = connect(self._connection_config)
+        connection = self._connection_pool.connect()
         try:
             query_key = resolve_query_key(connection, payload.query_key, payload.query_text)
             event = self._event_message(
                 event_type="search_query",
                 user_id=payload.user_id,
+                event_id=payload.event_id,
                 query_key=query_key,
                 query_text=payload.query_text,
+                request_id=payload.event_id,
                 surface="search",
                 event_ts=event_ts,
             )
             connection.begin()
+            claimed = True
             if self._settings.event_mode != "kafka_async":
-                profile_row = fetch_profile_row(connection, payload.user_id)
-                record_search_query(
-                    connection=connection,
-                    user_id=payload.user_id,
-                    query_key=query_key,
-                    event_ts=event_ts,
-                    external_event_id=event.event_id,
-                )
-                append_recent_query(
-                    connection=connection,
-                    profile_row=profile_row,
-                    query_key=query_key,
-                    event_ts=event_ts,
-                    behavior_delta=self._settings.search_query_behavior_delta,
-                )
+                claimed = claim_event_id(connection, event)
+                if claimed:
+                    profile_row = fetch_profile_row(
+                        connection,
+                        payload.user_id,
+                        for_update=True,
+                    )
+                    record_search_query(
+                        connection=connection,
+                        user_id=payload.user_id,
+                        query_key=query_key,
+                        event_ts=event_ts,
+                        external_event_id=event.event_id,
+                    )
+                    append_recent_query(
+                        connection=connection,
+                        profile_row=profile_row,
+                        query_key=query_key,
+                        event_ts=event_ts,
+                        behavior_delta=self._settings.search_query_behavior_delta,
+                    )
 
             matched_topics = load_search_matched_topics(connection, query_key)
             search_candidates = load_search_candidates(
@@ -360,6 +588,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
             selected = scored_items[: payload.page_size]
             response = SearchResponse(
                 user_id=payload.user_id,
+                request_id=event.event_id,
                 query_key=query_key,
                 items=[pair[1] for pair in selected],
                 debug=SearchDebugPayload(
@@ -369,8 +598,8 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 if payload.debug
                 else None,
             )
+            self._enqueue_raw_event(connection, event)
             connection.commit()
-            self._publish_event(event)
             return response
         except Exception:
             connection.rollback()
@@ -380,22 +609,54 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
     def record_recommendation_click(self, payload: RecommendationClickRequest) -> EventAckResponse:
         event_ts = int(time.time())
+        sponsored_attribution = self._load_sponsored_event_attribution(
+            delivery_id=payload.sponsored_delivery_id,
+            user_id=payload.user_id,
+            answer_id=payload.answer_id,
+        )
         event = self._event_message(
             event_type="recommendation_click",
             user_id=payload.user_id,
+            event_id=payload.event_id,
             answer_id=payload.answer_id,
             request_id=payload.request_id,
+            sponsored_delivery_id=payload.sponsored_delivery_id,
+            campaign_id=(
+                int(sponsored_attribution["campaign_id"])
+                if sponsored_attribution is not None
+                else None
+            ),
+            creative_id=(
+                int(sponsored_attribution["creative_id"])
+                if sponsored_attribution is not None
+                else None
+            ),
             surface="feed",
             event_ts=event_ts,
         )
         if self._settings.event_mode == "kafka_async":
-            self._publish_event(event)
+            self._persist_async_event(event)
             return EventAckResponse(ok=True, event_type="recommendation_click", debug=None)
 
-        connection = connect(self._connection_config)
+        connection = self._connection_pool.connect()
         try:
             connection.begin()
-            profile_row = fetch_profile_row(connection, payload.user_id)
+            if not claim_event_id(connection, event):
+                connection.commit()
+                return EventAckResponse(
+                    ok=True,
+                    event_type="recommendation_click",
+                    debug=None,
+                )
+            if payload.sponsored_delivery_id:
+                sponsored_attribution = load_sponsored_attribution(
+                    connection,
+                    delivery_id=payload.sponsored_delivery_id,
+                    user_id=payload.user_id,
+                    answer_id=payload.answer_id,
+                    for_update=True,
+                )
+            profile_row = fetch_profile_row(connection, payload.user_id, for_update=True)
             answer_topic_ids = load_answer_topic_ids(connection, payload.answer_id)
             topic_deltas = {
                 topic_id: self._settings.recommendation_click_topic_delta
@@ -412,7 +673,16 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 event_ts=event_ts,
                 topic_ids=answer_topic_ids,
                 external_event_id=event.event_id,
+                sponsored_delivery_id=event.sponsored_delivery_id,
+                campaign_id=event.campaign_id,
+                creative_id=event.creative_id,
             )
+            if sponsored_attribution is not None:
+                record_sponsored_click(
+                    connection,
+                    attribution=sponsored_attribution,
+                    event_ts=event_ts,
+                )
             update = apply_click_profile_update(
                 connection=connection,
                 profile_row=profile_row,
@@ -433,8 +703,8 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 if payload.debug
                 else None,
             )
+            self._enqueue_raw_event(connection, event)
             connection.commit()
-            self._publish_event(event)
             return response
         except Exception:
             connection.rollback()
@@ -445,23 +715,55 @@ class MysqlRuntimeRepository(RuntimeRepository):
     def record_search_result_click(self, payload: SearchResultClickRequest) -> EventAckResponse:
         query_key = normalize_query_key(payload.query_key)
         event_ts = int(time.time())
+        sponsored_attribution = self._load_sponsored_event_attribution(
+            delivery_id=payload.sponsored_delivery_id,
+            user_id=payload.user_id,
+            answer_id=payload.answer_id,
+        )
         event = self._event_message(
             event_type="search_result_click",
             user_id=payload.user_id,
+            event_id=payload.event_id,
             answer_id=payload.answer_id,
             query_key=query_key,
             request_id=payload.request_id,
+            sponsored_delivery_id=payload.sponsored_delivery_id,
+            campaign_id=(
+                int(sponsored_attribution["campaign_id"])
+                if sponsored_attribution is not None
+                else None
+            ),
+            creative_id=(
+                int(sponsored_attribution["creative_id"])
+                if sponsored_attribution is not None
+                else None
+            ),
             surface="search",
             event_ts=event_ts,
         )
         if self._settings.event_mode == "kafka_async":
-            self._publish_event(event)
+            self._persist_async_event(event)
             return EventAckResponse(ok=True, event_type="search_result_click", debug=None)
 
-        connection = connect(self._connection_config)
+        connection = self._connection_pool.connect()
         try:
             connection.begin()
-            profile_row = fetch_profile_row(connection, payload.user_id)
+            if not claim_event_id(connection, event):
+                connection.commit()
+                return EventAckResponse(
+                    ok=True,
+                    event_type="search_result_click",
+                    debug=None,
+                )
+            if payload.sponsored_delivery_id:
+                sponsored_attribution = load_sponsored_attribution(
+                    connection,
+                    delivery_id=payload.sponsored_delivery_id,
+                    user_id=payload.user_id,
+                    answer_id=payload.answer_id,
+                    for_update=True,
+                )
+            profile_row = fetch_profile_row(connection, payload.user_id, for_update=True)
             query_topics: list[SearchQueryTopic] = load_query_topics(connection, query_key)
             answer_topic_ids = load_answer_topic_ids(connection, payload.answer_id)
             query_topic_ids = {topic.topic_id for topic in query_topics}
@@ -485,7 +787,16 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 event_ts=event_ts,
                 topic_ids=topic_ids,
                 external_event_id=event.event_id,
+                sponsored_delivery_id=event.sponsored_delivery_id,
+                campaign_id=event.campaign_id,
+                creative_id=event.creative_id,
             )
+            if sponsored_attribution is not None:
+                record_sponsored_click(
+                    connection,
+                    attribution=sponsored_attribution,
+                    event_ts=event_ts,
+                )
             update = apply_click_profile_update(
                 connection=connection,
                 profile_row=profile_row,
@@ -510,8 +821,8 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 if payload.debug
                 else None,
             )
+            self._enqueue_raw_event(connection, event)
             connection.commit()
-            self._publish_event(event)
             return response
         except Exception:
             connection.rollback()
@@ -520,14 +831,14 @@ class MysqlRuntimeRepository(RuntimeRepository):
             connection.close()
 
     def get_debug_profile(self, user_id: int) -> DebugProfileResponse:
-        connection = connect(self._connection_config)
+        connection = self._connection_pool.connect()
         try:
             return profile_from_row(fetch_profile_row(connection, user_id))
         finally:
             connection.close()
 
     def list_personas(self, limit: int) -> PersonaListResponse:
-        connection = connect(self._connection_config)
+        connection = self._connection_pool.connect()
         try:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -564,7 +875,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
         return PersonaListResponse(items=items)
 
     def list_search_suggestions(self, limit: int) -> SuggestionListResponse:
-        connection = connect(self._connection_config)
+        connection = self._connection_pool.connect()
         try:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -595,7 +906,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
         return SuggestionListResponse(items=items)
 
     def get_answer_card(self, answer_id: int) -> AnswerCardResponse:
-        connection = connect(self._connection_config)
+        connection = self._connection_pool.connect()
         try:
             answer_rows = load_answer_rows(connection, [answer_id])
             row = answer_rows.get(answer_id)
@@ -628,9 +939,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 raise ValueError("recommendation_click requires answer_id")
             ack = self.record_recommendation_click(
                 RecommendationClickRequest(
+                    event_id=payload.event_id,
                     user_id=payload.user_id,
                     answer_id=payload.answer_id,
                     request_id=payload.request_id,
+                    sponsored_delivery_id=payload.sponsored_delivery_id,
                     debug=payload.debug,
                 )
             )
@@ -652,17 +965,17 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 raise ValueError("search_result_click requires answer_id and query_key")
             ack = self.record_search_result_click(
                 SearchResultClickRequest(
+                    event_id=payload.event_id,
                     user_id=payload.user_id,
                     answer_id=payload.answer_id,
                     query_key=payload.query_key,
                     request_id=payload.request_id,
+                    sponsored_delivery_id=payload.sponsored_delivery_id,
                     debug=payload.debug,
                 )
             )
             behavior_score = (
-                ack.debug.behavior_score
-                if isinstance(ack.debug, SearchResultClickDebug)
-                else None
+                ack.debug.behavior_score if isinstance(ack.debug, SearchResultClickDebug) else None
             )
             profile_updated = self._settings.event_mode != "kafka_async"
             return EventTrackResponse(
@@ -678,18 +991,35 @@ class MysqlRuntimeRepository(RuntimeRepository):
             # Apply the same positive profile update as a recommendation click,
             # but stamp the user_event row with event_type='upvote' for analytics distinction.
             event_ts = int(time.time())
+            sponsored_attribution = self._load_sponsored_event_attribution(
+                delivery_id=payload.sponsored_delivery_id,
+                user_id=payload.user_id,
+                answer_id=payload.answer_id,
+            )
             event = self._event_message(
                 event_type="upvote",
                 user_id=payload.user_id,
+                event_id=payload.event_id,
                 answer_id=payload.answer_id,
                 query_key=payload.query_key,
                 request_id=payload.request_id,
+                sponsored_delivery_id=payload.sponsored_delivery_id,
+                campaign_id=(
+                    int(sponsored_attribution["campaign_id"])
+                    if sponsored_attribution is not None
+                    else None
+                ),
+                creative_id=(
+                    int(sponsored_attribution["creative_id"])
+                    if sponsored_attribution is not None
+                    else None
+                ),
                 surface=payload.surface or "home_feed",
                 event_ts=event_ts,
                 dwell_ms=payload.dwell_ms,
             )
             if self._settings.event_mode == "kafka_async":
-                self._publish_event(event)
+                self._persist_async_event(event)
                 return EventTrackResponse(
                     ok=True,
                     event_type=payload.event_type,
@@ -697,10 +1027,26 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     behavior_score=None,
                 )
 
-            connection = connect(self._connection_config)
+            connection = self._connection_pool.connect()
             try:
                 connection.begin()
-                profile_row = fetch_profile_row(connection, payload.user_id)
+                if not claim_event_id(connection, event):
+                    connection.commit()
+                    return EventTrackResponse(
+                        ok=True,
+                        event_type=payload.event_type,
+                        profile_updated=True,
+                        behavior_score=None,
+                    )
+                if payload.sponsored_delivery_id:
+                    sponsored_attribution = load_sponsored_attribution(
+                        connection,
+                        delivery_id=payload.sponsored_delivery_id,
+                        user_id=payload.user_id,
+                        answer_id=payload.answer_id,
+                        for_update=True,
+                    )
+                profile_row = fetch_profile_row(connection, payload.user_id, for_update=True)
                 answer_topic_ids = load_answer_topic_ids(connection, payload.answer_id)
                 topic_deltas = {
                     topic_id: self._settings.recommendation_click_topic_delta
@@ -717,7 +1063,16 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     event_ts=event_ts,
                     topic_ids=answer_topic_ids,
                     external_event_id=event.event_id,
+                    sponsored_delivery_id=event.sponsored_delivery_id,
+                    campaign_id=event.campaign_id,
+                    creative_id=event.creative_id,
                 )
+                if sponsored_attribution is not None:
+                    record_sponsored_click(
+                        connection,
+                        attribution=sponsored_attribution,
+                        event_ts=event_ts,
+                    )
                 update = apply_click_profile_update(
                     connection=connection,
                     profile_row=profile_row,
@@ -727,8 +1082,8 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     behavior_delta=self._settings.recommendation_click_behavior_delta,
                     decay_factor=self._settings.profile_topic_decay,
                 )
+                self._enqueue_raw_event(connection, event)
                 connection.commit()
-                self._publish_event(event)
             except Exception:
                 connection.rollback()
                 raise
@@ -743,18 +1098,37 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
         # Log-only events: feed_impression, detail_view, dwell, downvote, share
         event_ts = int(time.time())
+        if payload.answer_id is None:
+            raise ValueError(f"{payload.event_type} requires answer_id")
+        sponsored_attribution = self._load_sponsored_event_attribution(
+            delivery_id=payload.sponsored_delivery_id,
+            user_id=payload.user_id,
+            answer_id=payload.answer_id,
+        )
         event = self._event_message(
             event_type=cast(UserEventType, payload.event_type),
             user_id=payload.user_id,
+            event_id=payload.event_id,
             answer_id=payload.answer_id,
             query_key=payload.query_key,
             request_id=payload.request_id,
+            sponsored_delivery_id=payload.sponsored_delivery_id,
+            campaign_id=(
+                int(sponsored_attribution["campaign_id"])
+                if sponsored_attribution is not None
+                else None
+            ),
+            creative_id=(
+                int(sponsored_attribution["creative_id"])
+                if sponsored_attribution is not None
+                else None
+            ),
             surface=payload.surface or "home_feed",
             event_ts=event_ts,
             dwell_ms=payload.dwell_ms,
         )
         if self._settings.event_mode == "kafka_async":
-            self._publish_event(event)
+            self._persist_async_event(event)
             return EventTrackResponse(
                 ok=True,
                 event_type=payload.event_type,
@@ -762,9 +1136,26 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 behavior_score=None,
             )
 
-        connection = connect(self._connection_config)
+        connection = self._connection_pool.connect()
         try:
-            record_log_only_event(
+            connection.begin()
+            if not claim_event_id(connection, event):
+                connection.commit()
+                return EventTrackResponse(
+                    ok=True,
+                    event_type=payload.event_type,
+                    profile_updated=False,
+                    behavior_score=None,
+                )
+            if payload.sponsored_delivery_id:
+                sponsored_attribution = load_sponsored_attribution(
+                    connection,
+                    delivery_id=payload.sponsored_delivery_id,
+                    user_id=payload.user_id,
+                    answer_id=payload.answer_id,
+                    for_update=True,
+                )
+            inserted = record_log_only_event(
                 connection=connection,
                 user_id=payload.user_id,
                 event_type=payload.event_type,
@@ -775,10 +1166,28 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 event_ts=event_ts,
                 debug_payload_json=None,
                 external_event_id=event.event_id,
+                sponsored_delivery_id=event.sponsored_delivery_id,
+                campaign_id=event.campaign_id,
+                creative_id=event.creative_id,
+                dwell_ms=event.dwell_ms,
             )
+            if (
+                inserted
+                and payload.event_type == "feed_impression"
+                and sponsored_attribution is not None
+            ):
+                confirm_sponsored_impression(
+                    connection,
+                    attribution=sponsored_attribution,
+                    event_ts=event_ts,
+                )
+            self._enqueue_raw_event(connection, event)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
         finally:
             connection.close()
-        self._publish_event(event)
         return EventTrackResponse(
             ok=True,
             event_type=payload.event_type,
@@ -788,41 +1197,176 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
     # ── orchestrator helpers ────────────────────────────────────
 
+    def _artifact_debug(self) -> ArtifactDebug:
+        lgb_metadata = loaded_model_metadata()
+        als_metadata = get_als_recall().metadata()
+        return ArtifactDebug(
+            lightgbm_data_fingerprint=(
+                str(lgb_metadata["data_fingerprint"])
+                if lgb_metadata.get("data_fingerprint")
+                else None
+            ),
+            lightgbm_feature_schema_version=(
+                int(lgb_metadata["feature_schema_version"])
+                if lgb_metadata.get("feature_schema_version") is not None
+                else None
+            ),
+            als_data_fingerprint=(
+                str(als_metadata["data_fingerprint"])
+                if als_metadata.get("data_fingerprint")
+                else None
+            ),
+            als_train_ratio=(
+                float(str(als_metadata["train_ratio"]))
+                if als_metadata.get("train_ratio") is not None
+                else None
+            ),
+        )
+
+    def _load_sponsored_event_attribution(
+        self,
+        *,
+        delivery_id: str | None,
+        user_id: int,
+        answer_id: int,
+    ) -> dict[str, Any] | None:
+        if not delivery_id:
+            return None
+        connection = self._connection_pool.connect()
+        try:
+            return load_sponsored_attribution(
+                connection,
+                delivery_id=delivery_id,
+                user_id=user_id,
+                answer_id=answer_id,
+            )
+        finally:
+            connection.close()
+
+    def _build_sponsored_feed_items(
+        self,
+        connection: Any,
+        deliveries: list[SponsoredDelivery],
+    ) -> tuple[list[FeedItem], list[SponsoredCandidateDebug]]:
+        if not deliveries:
+            return [], []
+        answer_ids = [delivery.answer_id for delivery in deliveries]
+        answer_rows = load_answer_rows(connection, answer_ids)
+        topics_by_answer = load_topics_by_answer(connection, answer_ids)
+        items: list[FeedItem] = []
+        debug_rows: list[SponsoredCandidateDebug] = []
+        for delivery in deliveries:
+            row = answer_rows.get(delivery.answer_id)
+            if row is None:
+                raise RuntimeError(f"sponsored creative answer is missing: {delivery.answer_id}")
+            topics = topics_by_answer.get(delivery.answer_id, [])
+            items.append(
+                FeedItem(
+                    answer_id=delivery.answer_id,
+                    question_id=int(row.get("question_id") or 0),
+                    question_title=row.get("question_title")
+                    or f"Question {row.get('question_id') or 0}",
+                    answer_summary=row.get("answer_summary")
+                    or f"Synthetic answer summary for answer {delivery.answer_id}.",
+                    author=AuthorCard(
+                        author_id=int(row.get("author_id") or 0),
+                        display_name=row.get("author_name")
+                        or f"Author {row.get('author_id') or 0}",
+                    ),
+                    topics=topics,
+                    selected_reason=(
+                        f"Sponsored candidate from {delivery.campaign_name}; "
+                        "eligible by topic, budget, pacing, and frequency cap."
+                    ),
+                    scores=FeedItemScores(
+                        base_recall_score=0.0,
+                        personalized_topic_score=0.0,
+                        default_topic_score=0.0,
+                        topic_match_score=0.0,
+                        query_recall_boost=0.0,
+                        final_score=round(delivery.sponsored_score, 6),
+                        sponsored_score=round(delivery.sponsored_score, 6),
+                    ),
+                    recall_sources=["sponsored"],
+                    is_fallback=False,
+                    content_type="sponsored",
+                    sponsored=SponsoredFeedMetadata(
+                        delivery_id=delivery.delivery_id,
+                        campaign_id=delivery.campaign_id,
+                        creative_id=delivery.creative_id,
+                    ),
+                )
+            )
+            debug_rows.append(
+                SponsoredCandidateDebug(
+                    campaign_id=delivery.campaign_id,
+                    creative_id=delivery.creative_id,
+                    answer_id=delivery.answer_id,
+                    slot_position=delivery.slot_position,
+                    expected_spend_micros=delivery.expected_spend_micros,
+                    sponsored_score=round(delivery.sponsored_score, 6),
+                )
+            )
+        return items, debug_rows
+
     def _event_message(
         self,
         *,
         event_type: UserEventType,
         user_id: int,
         event_ts: int,
+        event_id: str | None = None,
         answer_id: int | None = None,
         query_key: str | None = None,
         query_text: str | None = None,
         request_id: str | None = None,
+        sponsored_delivery_id: str | None = None,
+        campaign_id: int | None = None,
+        creative_id: int | None = None,
         surface: str = "feed",
         dwell_ms: int | None = None,
     ) -> UserEventMessage:
-        return UserEventMessage(
-            event_type=event_type,
-            user_id=user_id,
-            answer_id=answer_id,
-            query_key=query_key,
-            query_text=query_text,
-            request_id=request_id,
-            surface=surface,
-            event_ts=event_ts,
-            dwell_ms=dwell_ms,
-        )
+        message_values: dict[str, Any] = {
+            "event_type": event_type,
+            "user_id": user_id,
+            "answer_id": answer_id,
+            "query_key": query_key,
+            "query_text": query_text,
+            "request_id": request_id,
+            "sponsored_delivery_id": sponsored_delivery_id,
+            "campaign_id": campaign_id,
+            "creative_id": creative_id,
+            "surface": surface,
+            "event_ts": event_ts,
+            "dwell_ms": dwell_ms,
+        }
+        if event_id:
+            message_values["event_id"] = event_id
+        return UserEventMessage(**message_values)
 
-    def _publish_event(self, event: UserEventMessage) -> None:
+    def _enqueue_raw_event(self, connection: Any, event: UserEventMessage) -> None:
         if not self._settings.kafka_enabled:
             return
+        enqueue_outbox_message(
+            connection,
+            event_id=event.event_id,
+            topic=self._settings.kafka_raw_events_topic,
+            message_key=event.partition_key,
+            payload_json=event.model_dump_json(exclude_none=True),
+            payload_fingerprint=event.idempotency_fingerprint,
+        )
+
+    def _persist_async_event(self, event: UserEventMessage) -> None:
+        connection = self._connection_pool.connect()
         try:
-            self._event_publisher.publish_user_event(event)
-        except EventPublishError as exc:
-            if self._settings.event_mode == "kafka_dual_write":
-                log_dual_write_failure(exc)
-                return
+            connection.begin()
+            self._enqueue_raw_event(connection, event)
+            connection.commit()
+        except Exception:
+            connection.rollback()
             raise
+        finally:
+            connection.close()
 
     def _load_feed_candidates(
         self,
@@ -831,13 +1375,20 @@ class MysqlRuntimeRepository(RuntimeRepository):
         query_topic_scores: dict[int, float],
         page_size: int,
         user_id: int,
+        use_als: bool,
+        as_of_ts: int | None,
     ) -> dict[int, dict[str, Any]]:
         candidates: dict[int, dict[str, Any]] = {}
         profile_topic_ids = list(topic_weight_map)[:10]
         query_topic_ids = list(query_topic_scores)[:20]
         candidate_limit = max(page_size * 20, 50)
 
-        for row in load_answer_ids_for_topics(connection, profile_topic_ids, candidate_limit):
+        for row in load_answer_ids_for_topics(
+            connection,
+            profile_topic_ids,
+            candidate_limit,
+            as_of_ts=as_of_ts,
+        ):
             add_feed_candidate(
                 candidates,
                 answer_id=int(row["answer_id"]),
@@ -846,7 +1397,12 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 raw_base_score=float(row.get("hot_score") or 0.0),
             )
 
-        for row in load_answer_ids_for_topics(connection, query_topic_ids, candidate_limit):
+        for row in load_answer_ids_for_topics(
+            connection,
+            query_topic_ids,
+            candidate_limit,
+            as_of_ts=as_of_ts,
+        ):
             add_feed_candidate(
                 candidates,
                 answer_id=int(row["answer_id"]),
@@ -856,12 +1412,24 @@ class MysqlRuntimeRepository(RuntimeRepository):
             )
 
         # ── ALS collaborative filtering recall (4th channel) ───────
-        if self._settings.als_recall_enabled:
+        if use_als:
             als = get_als_recall()
-            for answer_id, sim_score in als.get_candidates(
+            als_candidates = als.get_candidates(
                 user_id=user_id,
                 k=self._settings.als_recall_top_k,
-            ):
+            )
+            allowed_als_answer_ids = (
+                load_answer_ids_created_as_of(
+                    connection,
+                    [answer_id for answer_id, _ in als_candidates],
+                    as_of_ts=as_of_ts,
+                )
+                if as_of_ts is not None
+                else {answer_id for answer_id, _ in als_candidates}
+            )
+            for answer_id, sim_score in als_candidates:
+                if answer_id not in allowed_als_answer_ids:
+                    continue
                 add_feed_candidate(
                     candidates,
                     answer_id=answer_id,
@@ -874,7 +1442,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
             1 for candidate in candidates.values() if not candidate["is_fallback"]
         )
         if non_fallback_count < page_size:
-            for row in load_hot_fallback_rows(connection, max(page_size * 5, 20)):
+            for row in load_hot_fallback_rows(
+                connection,
+                max(page_size * 5, 20),
+                as_of_ts=as_of_ts,
+            ):
                 if len(candidates) >= page_size:
                     break
                 add_feed_candidate(

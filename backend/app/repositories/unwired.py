@@ -10,7 +10,7 @@ from backend.app.schemas.event import (
     SearchResultClickRequest,
 )
 from backend.app.schemas.event_track import EventTrackRequest, EventTrackResponse
-from backend.app.schemas.feed import FeedResponse
+from backend.app.schemas.feed import FeedExperimentArm, FeedResponse
 from backend.app.schemas.persona import PersonaListResponse
 from backend.app.schemas.profile import DebugProfileResponse
 from backend.app.schemas.search import SearchRequest, SearchResponse
@@ -23,7 +23,19 @@ class UnwiredRuntimeRepository(RuntimeRepository):
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    def get_feed(self, user_id: int, page_size: int, debug: bool) -> FeedResponse:
+    def close(self) -> None:
+        return None
+
+    def get_feed(
+        self,
+        user_id: int,
+        page_size: int,
+        debug: bool,
+        experiment_arm: FeedExperimentArm = "default",
+        include_sponsored: bool = True,
+        request_id: str | None = None,
+        as_of_ts: int | None = None,
+    ) -> FeedResponse:
         raise RepositoryNotReadyError("GET /feed")
 
     def search(self, payload: SearchRequest) -> SearchResponse:

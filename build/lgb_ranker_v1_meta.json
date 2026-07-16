@@ -1,4 +1,5 @@
 {
+  "feature_schema_version": 2,
   "features": [
     "base_score",
     "personalized_topic_score",
@@ -15,10 +16,27 @@
     "answer_has_video",
     "answer_is_high_value",
     "answer_is_editor_recommended",
-    "answer_likes_count",
-    "answer_collection_count",
-    "author_is_excellent_answerer",
-    "author_follower_count"
+    "author_is_excellent_answerer"
   ],
-  "model_path": "lgb_ranker_v1.txt"
+  "model_path": "lgb_ranker_v1.txt",
+  "data_fingerprint": "799d1af346e720bfe51745e18c074313cc7e54c50aea4111bab9ab75fe6e5fa9",
+  "split_summary": {
+    "events_total": 802,
+    "impressions_total": 479,
+    "samples_total": 479,
+    "users": 3,
+    "train_requests": 292,
+    "test_requests": 73,
+    "train_positive": 210,
+    "train_negative": 172,
+    "test_positive": 50,
+    "test_negative": 45
+  },
+  "test_metrics": {
+    "roc_auc": 0.5942222222222222,
+    "pr_auc": 0.5992825838894994,
+    "log_loss": 0.7179859198539812
+  },
+  "train_ratio": 0.8,
+  "attribution_window_seconds": 14400
 }

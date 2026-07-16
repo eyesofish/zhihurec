@@ -1,1 +1,1 @@
-"""Pydantic schemas for the ZhihuRec backend skeleton."""
+"""Pydantic schemas for the ZhihuRec backend."""

@@ -1,30 +1,44 @@
 from __future__ import annotations
 
+import base64
 import importlib
 import logging
-from typing import Any, cast
+import time
+from typing import Any, Literal, cast
 
 from pydantic import ValidationError
 
 from backend.app.config import Settings, get_settings
-from backend.app.events.publisher import EventPublisher, build_event_publisher
+from backend.app.events.outbox import enqueue_outbox_message
+from backend.app.events.publisher import build_event_publisher
 from backend.app.events.schema import (
     DlqEventMessage,
     TrainingInteractionMessage,
     UserEventMessage,
 )
+from backend.app.events.worker_state import update_worker_heartbeat
+from backend.app.observability import (
+    CONSUMER_EVENTS,
+    CONSUMER_LAG,
+    CONSUMER_RETRIES,
+)
 from backend.app.repositories._utils import json_text
-from backend.app.repositories.connection import connect, parse_database_url
+from backend.app.repositories.connection import MysqlConnectionPool, parse_database_url
 from backend.app.repositories.content_dao import load_answer_topic_ids, load_query_topics
 from backend.app.repositories.event_dao import (
     append_recent_query,
     apply_click_profile_update,
-    has_external_event_id,
+    claim_event_id,
     record_click_event,
     record_log_only_event,
     record_search_query,
 )
 from backend.app.repositories.profile_dao import fetch_profile_row
+from backend.app.repositories.sponsored_dao import (
+    confirm_sponsored_impression,
+    load_sponsored_attribution,
+    record_sponsored_click,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,56 +49,80 @@ class ProfileEventApplier:
     def __init__(
         self,
         settings: Settings | None = None,
-        publisher: EventPublisher | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         if not self._settings.database_url.strip():
             raise ValueError("ZHIHUREC_DATABASE_URL is required for the profile consumer")
         self._connection_config = parse_database_url(self._settings.database_url)
-        self._publisher = publisher or build_event_publisher(
-            self._settings,
-            client_id=f"{self._settings.kafka_client_id}-profile-consumer",
+        self._connection_pool = MysqlConnectionPool(
+            self._connection_config,
+            connect_timeout=self._settings.mysql_connect_timeout_seconds,
+            read_timeout=self._settings.mysql_read_timeout_seconds,
+            write_timeout=self._settings.mysql_write_timeout_seconds,
+            min_cached=self._settings.mysql_pool_min_cached,
+            max_cached=self._settings.mysql_pool_max_cached,
+            max_connections=self._settings.mysql_pool_max_connections,
         )
 
     def apply_event(self, event: UserEventMessage) -> bool:
-        connection = connect(self._connection_config)
-        applied = False
+        connection = self._connection_pool.connect()
         try:
             connection.begin()
-            if has_external_event_id(connection, event.event_id):
-                connection.commit()
-                return False
+            claimed = claim_event_id(connection, event)
+            if claimed:
+                if event.event_type == "search_query":
+                    self._apply_search_query(connection, event)
+                elif event.event_type == "recommendation_click":
+                    self._apply_recommendation_click(connection, event)
+                elif event.event_type == "search_result_click":
+                    self._apply_search_result_click(connection, event)
+                elif event.event_type == "upvote":
+                    self._apply_upvote(connection, event)
+                elif event.event_type in LOG_ONLY_EVENTS:
+                    self._apply_log_only(connection, event)
+                else:
+                    raise ValueError(f"unsupported event_type: {event.event_type}")
 
-            if event.event_type == "search_query":
-                self._apply_search_query(connection, event)
-            elif event.event_type == "recommendation_click":
-                self._apply_recommendation_click(connection, event)
-            elif event.event_type == "search_result_click":
-                self._apply_search_result_click(connection, event)
-            elif event.event_type == "upvote":
-                self._apply_upvote(connection, event)
-            elif event.event_type in LOG_ONLY_EVENTS:
-                self._apply_log_only(connection, event)
-            else:
-                raise ValueError(f"unsupported event_type: {event.event_type}")
-
+            training = self._training_message(event)
+            if training is not None:
+                enqueue_outbox_message(
+                    connection,
+                    event_id=training.example_id,
+                    topic=self._settings.kafka_training_topic,
+                    message_key=training.partition_key,
+                    payload_json=training.model_dump_json(exclude_none=True),
+                )
             connection.commit()
-            applied = True
+            return claimed
         except Exception:
             connection.rollback()
             raise
         finally:
             connection.close()
 
-        training = self._training_message(event)
-        if training is not None:
-            self._publisher.publish_training_interaction(training)
-        return applied
+    def update_heartbeat(
+        self,
+        *,
+        made_progress: bool,
+        lag_messages: int,
+        last_error: str | None = None,
+    ) -> None:
+        connection = self._connection_pool.connect()
+        try:
+            update_worker_heartbeat(
+                connection,
+                worker_name="profile-consumer",
+                made_progress=made_progress,
+                lag_messages=lag_messages,
+                last_error=last_error,
+            )
+        finally:
+            connection.close()
 
     def _apply_search_query(self, connection: Any, event: UserEventMessage) -> None:
         if not event.query_key:
             raise ValueError("search_query event requires query_key")
-        profile_row = fetch_profile_row(connection, event.user_id)
+        profile_row = fetch_profile_row(connection, event.user_id, for_update=True)
         record_search_query(
             connection=connection,
             user_id=event.user_id,
@@ -127,7 +165,18 @@ class ProfileEventApplier:
     def _apply_search_result_click(self, connection: Any, event: UserEventMessage) -> None:
         if event.answer_id is None or not event.query_key:
             raise ValueError("search_result_click event requires answer_id and query_key")
-        profile_row = fetch_profile_row(connection, event.user_id)
+        profile_row = fetch_profile_row(connection, event.user_id, for_update=True)
+        sponsored_attribution = (
+            load_sponsored_attribution(
+                connection,
+                delivery_id=event.sponsored_delivery_id,
+                user_id=event.user_id,
+                answer_id=event.answer_id,
+                for_update=True,
+            )
+            if event.sponsored_delivery_id
+            else None
+        )
         query_topics = load_query_topics(connection, event.query_key)
         answer_topic_ids = load_answer_topic_ids(connection, event.answer_id)
         query_topic_ids = {topic.topic_id for topic in query_topics}
@@ -151,7 +200,17 @@ class ProfileEventApplier:
             event_ts=event.event_ts,
             topic_ids=sorted(query_topic_ids | answer_topic_set),
             external_event_id=event.event_id,
+            sponsored_delivery_id=event.sponsored_delivery_id,
+            campaign_id=event.campaign_id,
+            creative_id=event.creative_id,
+            dwell_ms=event.dwell_ms,
         )
+        if sponsored_attribution is not None:
+            record_sponsored_click(
+                connection,
+                attribution=sponsored_attribution,
+                event_ts=event.event_ts,
+            )
         apply_click_profile_update(
             connection=connection,
             profile_row=profile_row,
@@ -174,7 +233,18 @@ class ProfileEventApplier:
     ) -> None:
         if event.answer_id is None:
             raise ValueError(f"{event_type} event requires answer_id")
-        profile_row = fetch_profile_row(connection, event.user_id)
+        profile_row = fetch_profile_row(connection, event.user_id, for_update=True)
+        sponsored_attribution = (
+            load_sponsored_attribution(
+                connection,
+                delivery_id=event.sponsored_delivery_id,
+                user_id=event.user_id,
+                answer_id=event.answer_id,
+                for_update=True,
+            )
+            if event.sponsored_delivery_id
+            else None
+        )
         answer_topic_ids = load_answer_topic_ids(connection, event.answer_id)
         topic_deltas = {topic_id: topic_delta for topic_id in answer_topic_ids}
         record_click_event(
@@ -188,7 +258,17 @@ class ProfileEventApplier:
             event_ts=event.event_ts,
             topic_ids=answer_topic_ids,
             external_event_id=event.event_id,
+            sponsored_delivery_id=event.sponsored_delivery_id,
+            campaign_id=event.campaign_id,
+            creative_id=event.creative_id,
+            dwell_ms=event.dwell_ms,
         )
+        if sponsored_attribution is not None:
+            record_sponsored_click(
+                connection,
+                attribution=sponsored_attribution,
+                event_ts=event.event_ts,
+            )
         apply_click_profile_update(
             connection=connection,
             profile_row=profile_row,
@@ -200,7 +280,18 @@ class ProfileEventApplier:
         )
 
     def _apply_log_only(self, connection: Any, event: UserEventMessage) -> None:
-        record_log_only_event(
+        sponsored_attribution = (
+            load_sponsored_attribution(
+                connection,
+                delivery_id=event.sponsored_delivery_id,
+                user_id=event.user_id,
+                answer_id=int(event.answer_id),
+                for_update=True,
+            )
+            if event.sponsored_delivery_id and event.answer_id is not None
+            else None
+        )
+        inserted = record_log_only_event(
             connection=connection,
             user_id=event.user_id,
             event_type=event.event_type,
@@ -211,7 +302,17 @@ class ProfileEventApplier:
             event_ts=event.event_ts,
             debug_payload_json=json_text(event.debug) if event.debug else None,
             external_event_id=event.event_id,
+            sponsored_delivery_id=event.sponsored_delivery_id,
+            campaign_id=event.campaign_id,
+            creative_id=event.creative_id,
+            dwell_ms=event.dwell_ms,
         )
+        if inserted and event.event_type == "feed_impression" and sponsored_attribution is not None:
+            confirm_sponsored_impression(
+                connection,
+                attribution=sponsored_attribution,
+                event_ts=event.event_ts,
+            )
 
     def _training_message(self, event: UserEventMessage) -> TrainingInteractionMessage | None:
         label_by_type = {
@@ -219,23 +320,31 @@ class ProfileEventApplier:
             "search_result_click": 1.0,
             "upvote": 1.0,
             "downvote": 0.0,
-            "feed_impression": 0.0,
+            "feed_impression": None,
         }
-        label = label_by_type.get(event.event_type)
-        if label is None or event.answer_id is None:
+        if event.event_type not in label_by_type or event.answer_id is None:
             return None
         return TrainingInteractionMessage(
             example_id=event.event_id,
             user_id=event.user_id,
             answer_id=event.answer_id,
             query_key=event.query_key,
-            label=label,
+            request_id=event.request_id,
+            surface=event.surface,
+            sponsored_delivery_id=event.sponsored_delivery_id,
+            campaign_id=event.campaign_id,
+            creative_id=event.creative_id,
+            label=label_by_type[event.event_type],
             event_type=event.event_type,
             event_ts=event.event_ts,
         )
 
 
-def run_profile_consumer(settings: Settings | None = None) -> None:
+def run_profile_consumer(
+    settings: Settings | None = None,
+    *,
+    max_messages: int | None = None,
+) -> None:
     active_settings = settings or get_settings()
     confluent_kafka = cast(Any, importlib.import_module("confluent_kafka"))
     consumer_cls = confluent_kafka.Consumer
@@ -251,31 +360,142 @@ def run_profile_consumer(settings: Settings | None = None) -> None:
         active_settings,
         client_id=f"{active_settings.kafka_client_id}-profile-consumer",
     )
-    applier = ProfileEventApplier(active_settings, publisher)
+    applier = ProfileEventApplier(active_settings)
     consumer.subscribe([active_settings.kafka_raw_events_topic])
     logger.info("profile consumer subscribed to %s", active_settings.kafka_raw_events_topic)
-
-    while True:
-        message = consumer.poll(1.0)
-        if message is None:
-            continue
-        if message.error():
-            raise RuntimeError(message.error())
-
-        raw_payload = message.value().decode("utf-8")
-        try:
-            event = UserEventMessage.model_validate_json(raw_payload)
-            applier.apply_event(event)
-            consumer.commit(message=message)
-        except (ValidationError, ValueError) as exc:
-            publisher.publish_dlq_event(
-                DlqEventMessage(
-                    original_topic=message.topic(),
-                    original_partition=message.partition(),
-                    original_offset=message.offset(),
-                    original_payload=raw_payload,
-                    error_type=type(exc).__name__,
-                    error_message=str(exc),
+    processed_messages = 0
+    current_lag = 0
+    partition_lags: dict[tuple[str, int], int] = {}
+    try:
+        while max_messages is None or processed_messages < max_messages:
+            message = consumer.poll(1.0)
+            if message is None:
+                try:
+                    assignments = consumer.assignment()
+                    positions = consumer.position(assignments)
+                    for position in positions:
+                        _, high_watermark = consumer.get_watermark_offsets(
+                            position,
+                            cached=False,
+                        )
+                        position_offset = int(position.offset)
+                        if position_offset < 0:
+                            position_offset = int(high_watermark)
+                        lag = max(0, int(high_watermark) - position_offset)
+                        key = (str(position.topic), int(position.partition))
+                        partition_lags[key] = lag
+                        CONSUMER_LAG.labels(
+                            topic=key[0],
+                            partition=str(key[1]),
+                        ).set(lag)
+                    current_lag = max(partition_lags.values(), default=0)
+                except Exception:
+                    logger.debug("unable to refresh consumer lag metric", exc_info=True)
+                applier.update_heartbeat(
+                    made_progress=False,
+                    lag_messages=current_lag,
                 )
-            )
-            consumer.commit(message=message)
+                continue
+            if message.error():
+                raise RuntimeError(message.error())
+
+            try:
+                topic_partition = confluent_kafka.TopicPartition(
+                    message.topic(),
+                    message.partition(),
+                )
+                _, high_watermark = consumer.get_watermark_offsets(
+                    topic_partition,
+                    cached=False,
+                )
+                message_lag = max(
+                    0,
+                    int(high_watermark) - int(message.offset()) - 1,
+                )
+                partition_key = (str(message.topic()), int(message.partition()))
+                partition_lags[partition_key] = message_lag
+                current_lag = max(partition_lags.values(), default=0)
+                CONSUMER_LAG.labels(
+                    topic=message.topic(),
+                    partition=str(message.partition()),
+                ).set(message_lag)
+            except Exception:
+                logger.debug("unable to update consumer lag metric", exc_info=True)
+
+            raw_payload = ""
+            raw_payload_encoding: Literal["utf-8", "base64"] = "utf-8"
+            retry_count = 0
+            while True:
+                try:
+                    raw_value = message.value()
+                    if raw_value is None:
+                        raise ValueError("Kafka tombstone payload is not a valid user event")
+                    try:
+                        raw_payload = raw_value.decode("utf-8")
+                    except UnicodeDecodeError as exc:
+                        raw_payload = base64.b64encode(raw_value).decode("ascii")
+                        raw_payload_encoding = "base64"
+                        raise ValueError("Kafka payload is not valid UTF-8") from exc
+                    event = UserEventMessage.model_validate_json(raw_payload)
+                    applied = applier.apply_event(event)
+                    CONSUMER_EVENTS.labels(
+                        outcome="applied" if applied else "duplicate",
+                        event_type=event.event_type,
+                    ).inc()
+                    consumer.commit(message=message, asynchronous=False)
+                    applier.update_heartbeat(
+                        made_progress=True,
+                        lag_messages=current_lag,
+                    )
+                    break
+                except (ValidationError, ValueError) as exc:
+                    publisher.publish_dlq_event(
+                        DlqEventMessage(
+                            original_topic=message.topic(),
+                            original_partition=message.partition(),
+                            original_offset=message.offset(),
+                            original_payload=raw_payload,
+                            original_payload_encoding=raw_payload_encoding,
+                            error_type=type(exc).__name__,
+                            error_message=str(exc),
+                        )
+                    )
+                    publisher.flush()
+                    CONSUMER_EVENTS.labels(
+                        outcome="dlq",
+                        event_type="invalid",
+                    ).inc()
+                    consumer.commit(message=message, asynchronous=False)
+                    applier.update_heartbeat(
+                        made_progress=True,
+                        lag_messages=current_lag,
+                    )
+                    break
+                except Exception as exc:
+                    retry_count += 1
+                    CONSUMER_RETRIES.inc()
+                    if retry_count > active_settings.kafka_consumer_max_retries:
+                        applier.update_heartbeat(
+                            made_progress=False,
+                            lag_messages=current_lag,
+                            last_error=f"{type(exc).__name__}: {exc}",
+                        )
+                        logger.exception(
+                            "profile consumer exhausted retries topic=%s partition=%s offset=%s",
+                            message.topic(),
+                            message.partition(),
+                            message.offset(),
+                        )
+                        raise
+                    delay = active_settings.kafka_consumer_retry_backoff_seconds * retry_count
+                    logger.warning(
+                        "profile consumer transient failure retry=%s delay=%.2fs error=%s",
+                        retry_count,
+                        delay,
+                        exc,
+                    )
+                    time.sleep(delay)
+            processed_messages += 1
+    finally:
+        consumer.close()
+        publisher.flush()

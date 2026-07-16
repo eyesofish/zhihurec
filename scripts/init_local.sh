@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+python_bin="${PYTHON:-python3}"
+database_url="${ZHIHUREC_DATABASE_URL:-mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo}"
+backend_port="${ZHIHUREC_BACKEND_PORT:-8000}"
+frontend_port="${ZHIHUREC_FRONTEND_PORT:-5173}"
+product_frontend_port="${ZHIHUREC_PRODUCT_FRONTEND_PORT:-5174}"
+smoke_test=0
+product_frontend=0
+with_kafka=0
+skip_frontend=0
+event_mode="${ZHIHUREC_EVENT_MODE:-kafka_dual_write}"
+runtime_dir="$repo_root/.runtime/init_local"
+declare -a started_pids=()
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/init_local.sh [options]
+  --smoke-test          Verify the stack and stop child processes.
+  --product-frontend    Start the React/Vite frontend.
+  --with-kafka          Start Kafka, profile consumer, and outbox publisher.
+  --event-mode MODE     kafka_dual_write or kafka_async (default dual write).
+  --skip-frontend       Do not start the static debug frontend.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --smoke-test) smoke_test=1 ;;
+    --product-frontend) product_frontend=1 ;;
+    --with-kafka) with_kafka=1 ;;
+    --skip-frontend) skip_frontend=1 ;;
+    --event-mode)
+      shift
+      event_mode="${1:?--event-mode requires a value}"
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+mkdir -p "$runtime_dir"
+
+cleanup() {
+  local pid
+  for pid in "${started_pids[@]:-}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
+}
+trap cleanup EXIT INT TERM
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Required command not found: $1" >&2
+    exit 1
+  }
+}
+
+wait_container() {
+  local container="$1"
+  local deadline=$((SECONDS + 120))
+  while (( SECONDS < deadline )); do
+    if [[ "$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null || true)" == "healthy" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Container did not become healthy: $container" >&2
+  exit 1
+}
+
+start_service() {
+  local name="$1"
+  shift
+  "$@" >"$runtime_dir/$name.out.log" 2>"$runtime_dir/$name.err.log" &
+  local pid=$!
+  started_pids+=("$pid")
+  sleep 1
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "$name exited during startup" >&2
+    tail -n 30 "$runtime_dir/$name.err.log" >&2 || true
+    exit 1
+  fi
+  echo "$name pid=$pid"
+}
+
+require_command "$python_bin"
+require_command docker
+require_command curl
+docker compose version >/dev/null
+
+echo "[1/6] Starting MySQL"
+docker compose up -d
+wait_container zhihurec-mysql
+
+if (( with_kafka )); then
+  echo "[2/6] Starting Kafka"
+  docker compose -f docker-compose.kafka.yml up -d
+  wait_container zhihurec-kafka
+  export ZHIHUREC_EVENT_MODE="$event_mode"
+  export ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS="${ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:9092}"
+else
+  echo "[2/6] Kafka disabled"
+  export ZHIHUREC_EVENT_MODE=sync_mysql
+fi
+
+export ZHIHUREC_DATABASE_URL="$database_url"
+export ZHIHUREC_SPONSORED_ENABLED="${ZHIHUREC_SPONSORED_ENABLED:-1}"
+
+echo "[3/6] Applying schema and demo seed"
+"$python_bin" scripts/apply_demo_mysql.py
+"$python_bin" scripts/reset_demo_user.py
+
+echo "[4/6] Starting backend and workers"
+start_service backend "$python_bin" -m uvicorn backend.app.main:app \
+  --host 127.0.0.1 --port "$backend_port"
+if (( with_kafka )); then
+  start_service outbox "$python_bin" scripts/run_outbox_publisher.py
+  start_service consumer "$python_bin" scripts/run_profile_consumer.py
+fi
+
+echo "[5/6] Starting frontends"
+if (( ! skip_frontend )); then
+  start_service frontend "$python_bin" -m http.server "$frontend_port" -d frontend
+fi
+if (( product_frontend )); then
+  require_command npm
+  if [[ ! -d product-frontend/node_modules ]]; then
+    (cd product-frontend && npm ci)
+  fi
+  (
+    cd product-frontend
+    exec npm run dev -- --host 127.0.0.1 --port "$product_frontend_port"
+  ) >"$runtime_dir/product-frontend.out.log" 2>"$runtime_dir/product-frontend.err.log" &
+  started_pids+=("$!")
+fi
+
+echo "[6/6] Running smoke checks"
+"$python_bin" scripts/smoke_local.py \
+  --base-url "http://127.0.0.1:$backend_port" \
+  --timeout-seconds 90
+
+echo "Ready: backend=http://127.0.0.1:$backend_port"
+if (( product_frontend )); then
+  echo "Product frontend: http://127.0.0.1:$product_frontend_port"
+fi
+
+if (( smoke_test )); then
+  echo "Smoke test passed."
+  exit 0
+fi
+
+echo "Press Ctrl+C to stop processes started by this script."
+while true; do
+  for pid in "${started_pids[@]}"; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      if wait "$pid"; then
+        status=0
+      else
+        status=$?
+      fi
+      echo "A managed process exited with status $status" >&2
+      exit "$status"
+    fi
+  done
+  sleep 2
+done

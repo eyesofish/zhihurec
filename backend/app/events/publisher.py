@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import logging
 from typing import Any, Protocol, cast
 
 from backend.app.config import Settings
@@ -11,14 +10,14 @@ from backend.app.events.schema import (
     UserEventMessage,
 )
 
-logger = logging.getLogger(__name__)
-
 
 class EventPublishError(RuntimeError):
     pass
 
 
 class EventPublisher(Protocol):
+    def publish_payload(self, topic: str, key: str, value: bytes) -> None: ...
+
     def publish_user_event(self, event: UserEventMessage) -> None: ...
 
     def publish_training_interaction(self, message: TrainingInteractionMessage) -> None: ...
@@ -29,6 +28,9 @@ class EventPublisher(Protocol):
 
 
 class NoopEventPublisher:
+    def publish_payload(self, topic: str, key: str, value: bytes) -> None:
+        return None
+
     def publish_user_event(self, event: UserEventMessage) -> None:
         return None
 
@@ -50,11 +52,19 @@ class KafkaEventPublisher:
             {
                 "bootstrap.servers": settings.kafka_bootstrap_servers,
                 "client.id": client_id or settings.kafka_client_id,
+                "enable.idempotence": True,
+                "acks": "all",
+                "linger.ms": settings.kafka_producer_linger_ms,
             }
         )
         self._raw_topic = settings.kafka_raw_events_topic
         self._training_topic = settings.kafka_training_topic
         self._dlq_topic = settings.kafka_dlq_topic
+        self._flush_timeout_seconds = settings.kafka_producer_flush_timeout_seconds
+        self._delivery_errors: list[str] = []
+
+    def publish_payload(self, topic: str, key: str, value: bytes) -> None:
+        self._produce(topic, key, value)
 
     def publish_user_event(self, event: UserEventMessage) -> None:
         self._produce(self._raw_topic, event.partition_key, event.to_json_bytes())
@@ -66,17 +76,40 @@ class KafkaEventPublisher:
         self._produce(self._dlq_topic, message.partition_key, message.to_json_bytes())
 
     def flush(self) -> None:
-        remaining = self._producer.flush(10)
+        remaining = self._producer.flush(self._flush_timeout_seconds)
         if remaining:
             raise EventPublishError(f"Kafka producer flush left {remaining} message(s) undelivered")
+        if self._delivery_errors:
+            errors = "; ".join(self._delivery_errors)
+            self._delivery_errors.clear()
+            raise EventPublishError(f"Kafka delivery failed: {errors}")
 
     def _produce(self, topic: str, key: str, value: bytes) -> None:
         try:
-            self._producer.produce(topic, key=key.encode("utf-8"), value=value)
+            self._producer.produce(
+                topic,
+                key=key.encode("utf-8"),
+                value=value,
+                on_delivery=self._on_delivery,
+            )
             self._producer.poll(0)
-            self.flush()
+        except BufferError:
+            self._producer.poll(0.1)
+            try:
+                self._producer.produce(
+                    topic,
+                    key=key.encode("utf-8"),
+                    value=value,
+                    on_delivery=self._on_delivery,
+                )
+            except Exception as exc:
+                raise EventPublishError(f"Kafka producer queue is full for {topic}") from exc
         except Exception as exc:
             raise EventPublishError(f"failed to publish Kafka event to {topic}") from exc
+
+    def _on_delivery(self, error: Any, message: Any) -> None:
+        if error is not None:
+            self._delivery_errors.append(f"{message.topic()}[{message.partition()}]: {error}")
 
 
 def build_event_publisher(settings: Settings, *, client_id: str | None = None) -> EventPublisher:
@@ -88,7 +121,3 @@ def build_event_publisher(settings: Settings, *, client_id: str | None = None) -
         raise EventPublishError(
             "Kafka event mode requires the confluent-kafka package to be installed"
         ) from exc
-
-
-def log_dual_write_failure(exc: EventPublishError) -> None:
-    logger.warning("Kafka dual-write publish failed: %s", exc)

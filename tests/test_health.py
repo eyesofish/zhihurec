@@ -1,12 +1,56 @@
 from __future__ import annotations
 
 
-def test_healthz_returns_unwired_backend(unwired_client):
-    r = unwired_client.get("/healthz")
-    assert r.status_code == 200, r.text
-    body = r.json()
+def test_livez_reports_process_health_without_dependencies(unwired_client):
+    response = unwired_client.get("/livez")
+    assert response.status_code == 200, response.text
+    body = response.json()
     assert body["status"] == "ok"
     assert body["repository_backend"] == "unwired"
     assert body["database_configured"] is False
+    assert body["dependencies"]["process"]["status"] == "ok"
     assert isinstance(body["app_name"], str)
     assert isinstance(body["app_version"], str)
+
+
+def test_healthz_fails_when_mysql_is_not_configured(unwired_client):
+    response = unwired_client.get("/healthz")
+    assert response.status_code == 503, response.text
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["dependencies"]["mysql"]["status"] == "error"
+
+
+def test_metrics_endpoint_exposes_prometheus_text(unwired_client):
+    response = unwired_client.get("/metrics")
+    assert response.status_code == 200
+    assert "zhihurec_http_requests_total" in response.text
+
+
+def test_livez_does_not_open_mysql_connection():
+    from fastapi.testclient import TestClient
+
+    from backend.app.config import Settings
+    from backend.app.dependencies import get_app_settings
+    from backend.app.main import create_app
+
+    settings = Settings(database_url="mysql+pymysql://root:root@127.0.0.1:1/unreachable")
+    app = create_app()
+    app.dependency_overrides[get_app_settings] = lambda: settings
+
+    response = TestClient(app).get("/livez")
+
+    assert response.status_code == 200
+    assert response.json()["repository_backend"] == "mysql"
+
+
+def test_unmatched_paths_use_bounded_metrics_label(unwired_client):
+    first = unwired_client.get("/not-found/one")
+    second = unwired_client.get("/not-found/two")
+
+    assert first.status_code == 404
+    assert second.status_code == 404
+    metrics = unwired_client.get("/metrics").text
+    assert 'path="__unmatched__"' in metrics
+    assert 'path="/not-found/one"' not in metrics
+    assert 'path="/not-found/two"' not in metrics

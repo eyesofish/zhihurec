@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import atexit
+import logging
 from functools import lru_cache
 
 from backend.app.config import Settings, get_settings
@@ -11,6 +13,8 @@ from backend.app.services.feed import FeedService
 from backend.app.services.product import ProductService
 from backend.app.services.profile import ProfileService
 from backend.app.services.search import SearchService
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -47,3 +51,15 @@ def get_repository_backend_name() -> str:
 
 def get_app_settings() -> Settings:
     return get_settings()
+
+
+def close_runtime_repository() -> None:
+    if get_runtime_repository.cache_info().currsize == 0:
+        return
+    try:
+        get_runtime_repository().close()
+    except Exception:
+        logger.exception("failed to close runtime repository")
+
+
+atexit.register(close_runtime_repository)

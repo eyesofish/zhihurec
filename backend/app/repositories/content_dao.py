@@ -12,26 +12,110 @@ def load_answer_ids_for_topics(
     connection: Any,
     topic_ids: list[int],
     limit: int,
+    *,
+    as_of_ts: int | None = None,
 ) -> list[dict[str, Any]]:
     if not topic_ids:
         return []
     ph = placeholders(topic_ids)
+    if as_of_ts is None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT DISTINCT at.answer_id, a.hot_score
+                FROM answer_topic at
+                JOIN answer a ON a.answer_id = at.answer_id
+                WHERE at.topic_id IN ({ph})
+                ORDER BY a.hot_score DESC, at.answer_id ASC
+                LIMIT %s
+                """,
+                (*tuple(topic_ids), limit),
+            )
+            return list(cursor.fetchall())
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
-            SELECT DISTINCT at.answer_id, a.hot_score
+            SELECT DISTINCT
+              at.answer_id,
+              (
+                COALESCE(stats.click_count, 0) * 10
+                + COALESCE(stats.impression_count, 0)
+              ) AS hot_score
             FROM answer_topic at
             JOIN answer a ON a.answer_id = at.answer_id
+            LEFT JOIN (
+              SELECT
+                answer_id,
+                SUM(event_type = 'feed_impression') AS impression_count,
+                SUM(event_type IN (
+                  'recommendation_click',
+                  'search_result_click',
+                  'upvote'
+                )) AS click_count
+              FROM user_event
+              WHERE derived_from_raw = 1
+                AND event_ts < %s
+                AND answer_id IS NOT NULL
+              GROUP BY answer_id
+            ) stats ON stats.answer_id = at.answer_id
             WHERE at.topic_id IN ({ph})
-            ORDER BY a.hot_score DESC, at.answer_id ASC
+              AND (a.create_ts IS NULL OR a.create_ts <= %s)
+            ORDER BY hot_score DESC, at.answer_id ASC
             LIMIT %s
             """,
-            (*tuple(topic_ids), limit),
+            (as_of_ts, *tuple(topic_ids), as_of_ts, limit),
         )
         return list(cursor.fetchall())
 
 
-def load_hot_fallback_rows(connection: Any, limit: int) -> list[dict[str, Any]]:
+def load_hot_fallback_rows(
+    connection: Any,
+    limit: int,
+    *,
+    as_of_ts: int | None = None,
+) -> list[dict[str, Any]]:
+    if as_of_ts is not None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                  a.answer_id,
+                  (
+                    COALESCE(stats.click_count, 0) * 10
+                    + COALESCE(stats.impression_count, 0)
+                  ) AS hot_score,
+                  ROW_NUMBER() OVER (
+                    ORDER BY
+                      (
+                        COALESCE(stats.click_count, 0) * 10
+                        + COALESCE(stats.impression_count, 0)
+                      ) DESC,
+                      a.answer_id ASC
+                  ) AS rank_position
+                FROM answer a
+                LEFT JOIN (
+                  SELECT
+                    answer_id,
+                    SUM(event_type = 'feed_impression') AS impression_count,
+                    SUM(event_type IN (
+                      'recommendation_click',
+                      'search_result_click',
+                      'upvote'
+                    )) AS click_count
+                  FROM user_event
+                  WHERE derived_from_raw = 1
+                    AND event_ts < %s
+                    AND answer_id IS NOT NULL
+                  GROUP BY answer_id
+                ) stats ON stats.answer_id = a.answer_id
+                WHERE a.is_demo_selected = 1
+                  AND (a.create_ts IS NULL OR a.create_ts <= %s)
+                ORDER BY hot_score DESC, a.answer_id ASC
+                LIMIT %s
+                """,
+                (as_of_ts, as_of_ts, limit),
+            )
+            return list(cursor.fetchall())
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -47,6 +131,70 @@ def load_hot_fallback_rows(connection: Any, limit: int) -> list[dict[str, Any]]:
             (limit,),
         )
         return list(cursor.fetchall())
+
+
+def load_answer_event_counts_as_of(
+    connection: Any,
+    answer_ids: list[int],
+    *,
+    as_of_ts: int,
+) -> dict[int, dict[str, int | float]]:
+    if not answer_ids:
+        return {}
+    ph = placeholders(answer_ids)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT
+              answer_id,
+              SUM(event_type = 'feed_impression') AS impression_count,
+              SUM(event_type IN (
+                'recommendation_click',
+                'search_result_click',
+                'upvote'
+              )) AS click_count
+            FROM user_event
+            WHERE derived_from_raw = 1
+              AND event_ts < %s
+              AND answer_id IN ({ph})
+            GROUP BY answer_id
+            """,
+            (as_of_ts, *tuple(answer_ids)),
+        )
+        rows = cursor.fetchall()
+    result: dict[int, dict[str, int | float]] = {}
+    for row in rows:
+        answer_id = int(row["answer_id"])
+        click_count = int(row.get("click_count") or 0)
+        impression_count = int(row.get("impression_count") or 0)
+        result[answer_id] = {
+            "click_count": click_count,
+            "impression_count": impression_count,
+            "hot_score": float(click_count * 10 + impression_count),
+        }
+    return result
+
+
+def load_answer_ids_created_as_of(
+    connection: Any,
+    answer_ids: list[int],
+    *,
+    as_of_ts: int,
+) -> set[int]:
+    if not answer_ids:
+        return set()
+    ph = placeholders(answer_ids)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT answer_id
+            FROM answer
+            WHERE answer_id IN ({ph})
+              AND (create_ts IS NULL OR create_ts <= %s)
+            """,
+            (*tuple(answer_ids), as_of_ts),
+        )
+        return {int(row["answer_id"]) for row in cursor.fetchall()}
 
 
 def load_answer_rows(connection: Any, answer_ids: list[int]) -> dict[int, dict[str, Any]]:

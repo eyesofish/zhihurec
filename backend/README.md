@@ -1,89 +1,66 @@
 # ZhihuRec Backend
 
-This directory contains the first backend skeleton for the ZhihuRec `V1` project.
+FastAPI logical monolith for feed/search serving, event ingestion, profile state,
+sponsored delivery, health, and observability.
 
-Current scope:
-- FastAPI logical monolith
-- route shells for the frozen `V1` API set
-- service layer and repository boundary
-- explicit placeholder repository until MySQL query work is added
+## Runtime boundary
 
-Current non-goal:
-- real MySQL query implementation
-- recommendation logic
-- profile mutation logic
+- MySQL is the online source of truth.
+- `MysqlRuntimeRepository` owns serving orchestration and uses a bounded PyMySQL pool.
+- `user_profile` JSON mutations are serialized with `SELECT ... FOR UPDATE`.
+- `UnwiredRuntimeRepository` keeps imports and liveness available when no database URL is
+  configured; business endpoints and readiness return 503.
+- LightGBM and ALS artifacts are optional and schema-validated before serving.
 
-Install backend dependencies:
+## Event modes
 
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' -m pip install -r backend\requirements.txt
+- `sync_mysql`: mutate event/profile state synchronously.
+- `kafka_dual_write`: commit the MySQL mutation and raw-event outbox row atomically.
+- `kafka_async`: durably stage the raw event in MySQL Outbox and let the consumer mutate
+  profile state.
+
+`backend/app/events/consumer.py` validates schemas, preserves user-key ordering,
+deduplicates by external event ID, retries transient failures, sends poison messages to
+the DLQ, and writes training interactions through the durable outbox.
+
+Run workers:
+
+```bash
+python scripts/run_profile_consumer.py
+python scripts/run_outbox_publisher.py
 ```
 
-Optional MySQL runtime configuration:
+## API groups
 
-```powershell
-$env:ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@localhost:3306/zhihurec_demo'
+- recommendation: `/feed`;
+- search: `/search`, `/search/suggestions`;
+- product content: `/personas`, `/answers/{answer_id}`;
+- events: legacy click endpoints plus `/event/track`;
+- debugging: `/debug/profile`;
+- system: `/livez`, `/readyz`, `/healthz`, `/metrics`.
+
+The feed response is backward-compatible and adds `content_type` plus nullable sponsored
+metadata. Sponsored delivery uses existing answer cards and a separate eligibility,
+budget, pacing, frequency, and ledger path.
+
+## Run
+
+```bash
+export ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo'
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
-When `ZHIHUREC_DATABASE_URL` is not set, the backend uses `UnwiredRuntimeRepository`.
-When it is set, the backend selects `MysqlRuntimeRepository` without opening a database connection during app import.
+Use `scripts/init_local.sh` or `scripts/init_local.ps1` for the complete stack.
 
-Local runtime setup order:
+## Quality
 
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' -m pip install -r backend\requirements.txt
-& 'C:\ProgramData\anaconda3\python.exe' scripts\import_demo_world.py --input-dir build\demo_world --output-sql build\demo_world\import_demo_world.sql --truncate-first
-$env:ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@localhost:3306/zhihurec_demo'
-& 'C:\ProgramData\anaconda3\python.exe' scripts\apply_demo_mysql.py
-& 'C:\ProgramData\anaconda3\python.exe' scripts\reset_demo_user.py
-& 'C:\ProgramData\anaconda3\python.exe' -m uvicorn backend.app.main:app --reload
-```
-
-Smoke requests after the backend starts:
-
-```powershell
-Invoke-RestMethod 'http://127.0.0.1:8000/healthz'
-Invoke-RestMethod 'http://127.0.0.1:8000/debug/profile?user_id=7248'
-Invoke-RestMethod 'http://127.0.0.1:8000/feed?user_id=7248&page_size=10&debug=true'
-```
-
-Optional event replay:
-
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' scripts\replay_demo_events.py --limit 10
-```
-
-Suggested import check:
-
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' -c "from backend.app.main import app; print(app.title)"
-```
-
-Suggested route check:
-
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' -c "from backend.app.main import app; print(sorted({route.path for route in app.routes}))"
-```
-
-## Next implementation target
-
-Follow `plan/zhihurec-v1-runtime-closed-loop/` next.
-
-The next backend task is to add `MysqlRuntimeRepository` and make it the active runtime repository when `ZHIHUREC_DATABASE_URL` is configured. Until then, `UnwiredRuntimeRepository` intentionally returns controlled `repository_not_ready` responses for business endpoints.
-
-## Code quality
-
-Run before committing:
-
-```powershell
-# Format
-python -m ruff format backend\ scripts\ tests\
-# Lint
-python -m ruff check backend\ scripts\ tests\
-# Type check (backend/app only; see pyproject.toml [tool.mypy])
+```bash
+python -m ruff check backend scripts tests
 python -m mypy
-# Tests (default; see plan/zhihurec-v1-quality-upgrade/05 for coverage)
-python -m pytest -v
+python -m pytest -q
+python -m pytest -q -m "mysql and not kafka"
+python -m pytest -q -m kafka
 ```
 
-Rules and ignore policy live in `pyproject.toml`. Per-line `# noqa: <CODE>` must include a reason after a second `#`.
+The integration commands require the dependencies described in
+`docs/v1_local_runbook.md`; CI provisions them automatically.

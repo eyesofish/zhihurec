@@ -15,10 +15,16 @@ from backend.app.schemas.profile import (
 )
 
 
-def fetch_profile_row(connection: Any, user_id: int) -> dict[str, Any]:
+def fetch_profile_row(
+    connection: Any,
+    user_id: int,
+    *,
+    for_update: bool = False,
+) -> dict[str, Any]:
+    lock_clause = " FOR UPDATE" if for_update else ""
     with connection.cursor() as cursor:
         cursor.execute(
-            """
+            f"""
             SELECT
               user_id,
               cold_start_seed_key,
@@ -28,6 +34,7 @@ def fetch_profile_row(connection: Any, user_id: int) -> dict[str, Any]:
               behavior_score
             FROM user_profile
             WHERE user_id = %s
+            {lock_clause}
             """,
             (user_id,),
         )

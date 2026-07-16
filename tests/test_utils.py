@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from backend.app.repositories._utils import (
+    new_request_id,
     normalize_query_key,
     parse_json,
     placeholders,
@@ -74,3 +75,8 @@ def test_updated_topic_weights_caps_at_ten_entries_sorted_desc():
     assert len(result) == 10
     weights = [row["weight"] for row in result]
     assert weights == sorted(weights, reverse=True)
+
+
+def test_request_ids_are_collision_resistant():
+    request_ids = {new_request_id("zhihurec", "feed") for _ in range(1000)}
+    assert len(request_ids) == 1000

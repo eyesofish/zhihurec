@@ -65,9 +65,7 @@ def test_search_unresolved_text_returns_422_with_error_code():
         raise UnresolvedQueryError(payload.query_text or payload.query_key or "")
 
     client = _make_client(fake_search)
-    response = client.post(
-        "/search", json={"user_id": 7248, "query_text": "xyzzy-not-a-topic"}
-    )
+    response = client.post("/search", json={"user_id": 7248, "query_text": "xyzzy-not-a-topic"})
     assert response.status_code == 422
     body = response.json()
     assert body["error_code"] == "unresolved_query"
@@ -91,6 +89,7 @@ def test_search_numeric_query_key_reaches_repository():
         captured["payload"] = payload
         return SearchResponse(
             user_id=payload.user_id,
+            request_id="search-test",
             query_key=payload.query_key or "",
             items=[
                 SearchItem(
@@ -127,14 +126,13 @@ def test_search_text_query_reaches_repository():
         captured["payload"] = payload
         return SearchResponse(
             user_id=payload.user_id,
+            request_id="search-test",
             query_key="100 200",
             items=[],
         )
 
     client = _make_client(fake_search)
-    response = client.post(
-        "/search", json={"user_id": 7248, "query_text": "Falafel"}
-    )
+    response = client.post("/search", json={"user_id": 7248, "query_text": "Falafel"})
     assert response.status_code == 200
     assert response.json()["query_key"] == "100 200"
     assert captured["payload"].query_text == "Falafel"

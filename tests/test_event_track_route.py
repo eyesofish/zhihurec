@@ -20,9 +20,7 @@ def _first_feed_answer_id(client, user_id: int) -> int:
     return int(feed["items"][0]["answer_id"])
 
 
-def test_event_track_log_only_event_acks_without_profile_change(
-    mysql_client, mysql_demo_user
-):
+def test_event_track_log_only_event_acks_without_profile_change(mysql_client, mysql_demo_user):
     before = mysql_client.get("/debug/profile", params={"user_id": mysql_demo_user}).json()
     base_score = float(before["behavior_score"])
     answer_id = _first_feed_answer_id(mysql_client, mysql_demo_user)
@@ -45,6 +43,40 @@ def test_event_track_log_only_event_acks_without_profile_change(
 
     after = mysql_client.get("/debug/profile", params={"user_id": mysql_demo_user}).json()
     assert float(after["behavior_score"]) == pytest.approx(base_score, abs=1e-6)
+
+
+def test_event_track_impression_event_id_is_idempotent(mysql_client, mysql_demo_user):
+    from backend.app.config import get_settings
+    from backend.app.repositories.connection import connect, parse_database_url
+
+    answer_id = _first_feed_answer_id(mysql_client, mysql_demo_user)
+    event_id = f"test-impression-{mysql_demo_user}-{answer_id}"
+    payload = {
+        "event_id": event_id,
+        "user_id": mysql_demo_user,
+        "event_type": "feed_impression",
+        "surface": "home_feed",
+        "answer_id": answer_id,
+        "request_id": "test-request",
+    }
+
+    first = mysql_client.post("/event/track", json=payload)
+    second = mysql_client.post("/event/track", json=payload)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+
+    settings = get_settings()
+    connection = connect(parse_database_url(settings.database_url))
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) AS event_count FROM user_event WHERE external_event_id = %s",
+                (event_id,),
+            )
+            row = cursor.fetchone()
+    finally:
+        connection.close()
+    assert int(row["event_count"]) == 1
 
 
 def test_event_track_upvote_mutates_behavior_score(mysql_client, mysql_demo_user):
@@ -76,9 +108,7 @@ def test_event_track_upvote_mutates_behavior_score(mysql_client, mysql_demo_user
     assert after["recent_clicked_answers"][0]["answer_id"] == answer_id
 
 
-def test_event_track_legacy_recommendation_click_route_still_works(
-    mysql_client, mysql_demo_user
-):
+def test_event_track_legacy_recommendation_click_route_still_works(mysql_client, mysql_demo_user):
     answer_id = _first_feed_answer_id(mysql_client, mysql_demo_user)
     r = mysql_client.post(
         "/event/recommendation_click",
@@ -86,3 +116,113 @@ def test_event_track_legacy_recommendation_click_route_still_works(
     )
     assert r.status_code == 200
     assert r.json()["ok"] is True
+
+
+def test_event_track_feed_impression_requires_answer_id(mysql_client, mysql_demo_user):
+    response = mysql_client.post(
+        "/event/track",
+        json={
+            "user_id": mysql_demo_user,
+            "event_type": "feed_impression",
+            "surface": "home_feed",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_event_track_duplicate_upvote_is_idempotent(mysql_client, mysql_demo_user):
+    settings = Settings()
+    before = mysql_client.get("/debug/profile", params={"user_id": mysql_demo_user}).json()
+    answer_id = _first_feed_answer_id(mysql_client, mysql_demo_user)
+    payload = {
+        "event_id": f"duplicate-upvote-{mysql_demo_user}-{answer_id}",
+        "user_id": mysql_demo_user,
+        "event_type": "upvote",
+        "surface": "feed",
+        "answer_id": answer_id,
+    }
+
+    first = mysql_client.post("/event/track", json=payload)
+    second = mysql_client.post("/event/track", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    after = mysql_client.get("/debug/profile", params={"user_id": mysql_demo_user}).json()
+    assert float(after["behavior_score"]) - float(before["behavior_score"]) == pytest.approx(
+        settings.recommendation_click_behavior_delta,
+        abs=1e-3,
+    )
+
+
+def test_event_track_persists_dwell_duration(mysql_client, mysql_demo_user):
+    from backend.app.config import get_settings
+    from backend.app.repositories.connection import connect, parse_database_url
+
+    answer_id = _first_feed_answer_id(mysql_client, mysql_demo_user)
+    event_id = f"dwell-{mysql_demo_user}-{answer_id}"
+    response = mysql_client.post(
+        "/event/track",
+        json={
+            "event_id": event_id,
+            "user_id": mysql_demo_user,
+            "event_type": "dwell",
+            "surface": "feed",
+            "answer_id": answer_id,
+            "dwell_ms": 4321,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    settings = get_settings()
+    connection = connect(parse_database_url(settings.database_url))
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT dwell_ms FROM user_event WHERE external_event_id = %s",
+                (event_id,),
+            )
+            row = cursor.fetchone()
+    finally:
+        connection.close()
+    assert int(row["dwell_ms"]) == 4321
+
+
+def test_event_id_conflicting_payload_returns_409(mysql_client, mysql_demo_user):
+    first_answer = _first_feed_answer_id(mysql_client, mysql_demo_user)
+    feed = mysql_client.get(
+        "/feed",
+        params={
+            "user_id": mysql_demo_user,
+            "page_size": 2,
+            "include_sponsored": "false",
+        },
+    ).json()
+    second_answer = next(
+        int(item["answer_id"]) for item in feed["items"] if int(item["answer_id"]) != first_answer
+    )
+    event_id = f"conflicting-event-{mysql_demo_user}"
+
+    first = mysql_client.post(
+        "/event/track",
+        json={
+            "event_id": event_id,
+            "user_id": mysql_demo_user,
+            "event_type": "feed_impression",
+            "surface": "feed",
+            "answer_id": first_answer,
+        },
+    )
+    conflict = mysql_client.post(
+        "/event/track",
+        json={
+            "event_id": event_id,
+            "user_id": mysql_demo_user,
+            "event_type": "feed_impression",
+            "surface": "feed",
+            "answer_id": second_answer,
+        },
+    )
+
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+    assert conflict.json()["error_code"] == "idempotency_conflict"

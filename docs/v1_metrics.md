@@ -1,169 +1,175 @@
-# ZhihuRec V1 Metrics
+# ZhihuRec Metrics
 
-## V1 Evaluation Summary For Course Reports
+Verified on 2026-07-15. Machine-readable values:
+`docs/metrics/latest.json`.
 
-| Evidence type | Metric / artifact | Current value | Interpretation | Limitation / next step |
-|---|---:|---:|---|---|
-| Raw log scale | Feed impressions | 999,970 | Enough observed feed activity to motivate feed-to-search analysis. | Raw data does not include public text content for a production reading experience. |
-| Raw log scale | Search queries | 38,422 | Search is a common behavior, not a rare edge case. | Queries are short and need a topic bridge before they can drive recommendation. |
-| Behavioral hook | Queries with same-user feed exposure in previous 10 minutes | 35.4667% | Supports the research framing that search often follows feed browsing. | This is observational timing evidence, not causal proof. |
-| Mechanism metric | Search Carryover Gain@10 | +0.1000 | The replayed search signal increases later feed topic carryover from 0.9000 to 1.0000. | Topic-level alignment is easier than predicting the exact next clicked answer. |
-| Historical V1 item-ranking baseline | Recall@10 / NDCG@10 | 0.0000 / 0.0000 | The original top-10 feed did not hit held-out clicked answers in the single-snapshot split. | This remains the clean V1 baseline for explaining the retrieval bottleneck. |
-| Historical V1 candidate ceiling probe | Observed candidate_recall@50 | 0.1579 | Only 3/19 held-out clicks appeared in the visible top-50 feed. | Candidate retrieval needed improvement before reranking could matter. |
-| Current V1.5 live rerun | Recall@10 / NDCG@10 | 0.0833 / 0.0315 | With ML/collaborative artifacts present, the live backend now gets nonzero top-10 hits on 60 scored test clicks. | Do not treat this as an isolated LightGBM or ALS effect until ablations are run. |
-| Current V1.5 candidate probe | Observed candidate_recall@50 | 0.1667 | Visible top-50 coverage improved slightly but is still low. | Retrieval depth is still the next bottleneck. |
-| V1.5 ML / recall prototype | LightGBM + ALS artifacts | `build/lgb_ranker_v1.txt`, `build/faiss_index.bin`, ALS embedding maps | The repo contains prototype learning-to-rank and collaborative recall assets. | Report as V1.5 evidence; isolate arms before making a strong model claim. |
+## Evidence boundary
 
-## Search Carryover Gain@K
+These are local replay results for three selected personas, not online A/B results.
+They support mechanism and engineering claims only.
 
-**Definition** - for each `search_query` event $E_s$ whose `query_key` resolves to a
-non-empty topic set $T_s$ via `build/demo_world/query_topic_map.jsonl`:
+Do not translate them into CTR, satisfaction, causal lift, Ads revenue, or
+production-scale claims.
 
-$$
-\mathrm{Carryover@}K(F_K, T_s) = \frac{|\{a \in F_K : \mathrm{topics}(a) \cap T_s \neq \varnothing\}|}{K}
-$$
+## Current data
 
-where $F_K$ is the live `/feed` Top-K. Two passes:
+| Item | Value |
+|---|---:|
+| Personas | 3 |
+| Replay events | 802 |
+| Item-level feed impressions | 479 |
+| Selected serving answers | 2,000 |
+| Search events evaluated for carryover | 60 |
 
-- `baseline_carryover_at_K` - $F_K$ is the **fresh** feed snapshot taken right after
-  `reset_demo_user.py` (no events fed). Same snapshot is reused for every search event.
-- `replay_carryover_at_K` - $F_K$ is the live `/feed` after the event stream up to and
-  including $E_s$ has been replayed against the running backend.
+Every training example now comes from a real `feed_impression`. A click is attributed
+only when it matches `(user_id, request_id, answer_id)` inside the configured four-hour
+window. Random unexposed answers are not used as negatives.
 
-`carryover_gain_at_K = replay - baseline`. Positive gain quantifies "the user's search
-just shifted what the recommender showed next" - the engineering proof for the brief
-section 1 "feed -> search -> feed" story hook.
+Profile and item counters are replayed chronologically. Features are built before the
+current impression/click mutates state. Requests remain intact across the chronological
+train/test split.
 
-**Why this is a key secondary metric** - `project_brief_zh.md` section 17 lists Search
-Carryover Gain@K as the supporting number behind the "search reinforces recommendation"
-narrative. Without a number, that narrative is a slogan.
+## LightGBM pointwise prototype
 
-## How to run
+| Metric | Value |
+|---|---:|
+| Train samples | 382 |
+| Train positive / negative | 210 / 172 |
+| Test samples | 95 |
+| Test positive / negative | 50 / 45 |
+| ROC AUC | 0.5942 |
+| PR AUC | 0.5993 |
+| Log loss | 0.7180 |
 
-```powershell
-docker compose up -d
-$env:ZHIHUREC_DATABASE_URL = 'mysql+pymysql://root:root@localhost:3306/zhihurec_demo'
-& 'C:\ProgramData\anaconda3\python.exe' scripts\apply_demo_mysql.py
-& 'C:\ProgramData\anaconda3\python.exe' scripts\reset_demo_user.py
-# in a second window:
-& 'C:\ProgramData\anaconda3\python.exe' -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-# then back in the first window, AFTER reset_demo_user.py and AFTER backend healthy:
-& 'C:\ProgramData\anaconda3\python.exe' scripts\eval_replay_metrics.py --k 10 --limit 0
+The held-out set contains both classes, so AUC is finite and meaningful as a pointwise
+classification metric. This does not establish ranking lift.
+
+The artifact records feature schema version 2 and a data fingerprint. Serving refuses
+incompatible metadata instead of silently loading an old model.
+
+## Organic per-request ablation
+
+Protocol:
+
+1. Group replay events by original user.
+2. Split each user's item-exposure requests chronologically 80/20.
+3. Reset only that user to an empty evaluation seed derived strictly before the replay
+   window.
+4. Replay train-period search/click events.
+5. At each held-out request, score the current organic feed before applying its outcome.
+6. Compute request-level Recall@10, NDCG@10, and observed top-50 candidate coverage.
+7. Aggregate 46 scored requests across three users.
+
+Sponsored delivery is disabled for every arm.
+
+| Arm | Recall@10 | NDCG@10 | Observed candidate recall@50 |
+|---|---:|---:|---:|
+| manual | 0.0000 | 0.0000 | 0.1425 |
+| manual + ALS | 0.0435 | 0.0162 | **0.1621** |
+| LightGBM + ALS | **0.0761** | **0.0413** | 0.1219 |
+| LightGBM + ALS + search | 0.0326 | 0.0211 | 0.1209 |
+
+Interpretation:
+
+- Cutoff-safe ALS changed the result from zero manual hits to nonzero top-10 quality.
+- LightGBM + ALS is the strongest tested arm, but Recall@10 remains only 0.0761.
+- Adding the current search feature/path reduced both top-10 quality and candidate
+  coverage relative to LightGBM + ALS.
+- The honest current conclusion is that the staged pipeline is measurable, while the
+  search intervention still needs redesign before it can support a positive aggregate
+  claim.
+
+This negative result is intentionally retained. The resume-safe claim is that the
+project built and isolated the stages, not that ML improved recommendation quality.
+
+## Search Carryover Gain@10
+
+For a search with topic set \(T_s\):
+
+```text
+Carryover@K =
+  feed items in top K whose topics intersect T_s
+  ------------------------------------------------
+                         K
 ```
 
-The script prints a JSON object with `baseline_carryover_at_k`, `replay_carryover_at_k`,
-and `carryover_gain_at_k`.
+Each persona is reset and replayed independently. Baseline is that persona's reset feed;
+replay is the feed immediately after each search event.
 
-> The baseline is taken on the FIRST `/feed` call, so always run `reset_demo_user.py`
-> right before the eval. Re-running the eval without resetting yields a degenerate
-> baseline (already-warmed user) and inflates the apparent baseline.
+| User | Search events | Baseline | Replay | Gain |
+|---:|---:|---:|---:|---:|
+| 1026 | 20 | 0.4400 | 0.1800 | -0.2600 |
+| 3343 | 20 | 0.5200 | 0.2600 | -0.2600 |
+| 7248 | 20 | 0.2900 | 0.7500 | +0.4600 |
+| **Weighted aggregate** | **60** | **0.4167** | **0.3967** | **-0.0200** |
 
-## Historical baselines
+Interpretation:
 
-| Date       | K  | Limit | baseline | replay | gain   | events_posted (rec / search / s-click) | Notes |
-|------------|----|-------|----------|--------|--------|----------------------------------------|-------|
-| 2026-05-01 | 10 | 0 (all 121) | 0.9000 | 0.9750 | 0.0750 | 101 / 20 / 0 | First real baseline. `--limit 50` produced 0/0/0 because all 50 earliest events are `recommendation_click`; use `--limit 0` for full replay. |
-| 2026-05-01 | 10 | 0 (all 121) | 0.9000 | 1.0000 | 0.1000 | 80 / 20 / 21 | After B1: bumped `--search-window-seconds` default from 300 to 14400 in `scripts/build_demo_world.py`; replay now covers all three event types. Gain crosses the 0.10 "strong signal" threshold. |
-| 2026-05-01 | 10 | 0 (all 121) | 0.9000 | 1.0000 | 0.1000 | 80 / 20 / 21 | After B3 cold-start mixing: `/feed?debug=true` exposes `alpha=0.885443` at `behavior_score=365`; 7/10 debug items had non-zero `default_topic_score`, so the feed is now mixed default+personalized even though the metric stayed unchanged. |
+- The effect is highly heterogeneous across personas.
+- The aggregate intervention currently regresses topic alignment slightly.
+- User 7248 improves, while users 1026 and 3343 regress.
+- This is observational mechanism evidence, not proof that search causes engagement
+  improvement.
 
-## Interpretation
+## ALS / FAISS semantics
 
-- `gain >= 0.10` - strong signal; quotable in a resume bullet.
-- `0 < gain < 0.10` - directionally correct but weak; check `query_recall_boost`
-  weighting and topic matching in `backend/app/repositories/mysql.py`.
-- `gain == 0` - recall has no `query -> topic` path; investigate feed recall sources.
-- `gain < 0` - search is anti-correlated with the next feed; that is a bug, stop and
-  debug before reporting.
+The current artifact contains:
 
-## Caveats
+- 3 user factors;
+- 210 item factors trained only from outcomes before the 80%/20% cutoff;
+- 32 dimensions;
+- FAISS `IndexFlatIP`.
 
-- Baseline is a single snapshot; `replay_carryover_at_K` is averaged across all valid
-  search events in the limited window. The two are not symmetric; they are designed
-  to bracket "fresh" vs "warmed by events" rather than form a paired test.
-- The 2026-05-01 baseline of 0.9000 is unusually high because `reset_demo_user.py`
-  leaves the demo user with 10 recent_clicked_answers and 5 recent_queries seeded
-  in the demo world. The "fresh" feed is therefore already topic-aligned. Headroom
-  for `gain` is compressed; a 0.075 gain on a 0.90 baseline still represents real
-  reshaping, roughly 0.75 extra hits per query on average at K=10.
-- 2026-05-01 B3 onward: `baseline_carryover_at_k` is computed against the mixed
-  default-plus-personalized feed. The reset demo user still has `behavior_score = 365`,
-  so `alpha = 0.885443` and the baseline remains close to the personalized end. For
-  a true zero-behavior cold-start probe, run a one-shot SQL update setting
-  `behavior_score = 0` before the eval call and report that separately.
-- `query_topic_map.jsonl` is the offline cooccurrence table built by
-  `scripts/build_demo_world.py`; topic resolution depends on it being regenerated
-  whenever the underlying CSV data changes.
-- Since B1, `demo_event_replay.jsonl` contains `recommendation_click`, `search_query`,
-  and `search_result_click` events. The Carryover Gain@K calculation still evaluates
-  only `search_query` moments, while replaying all event types into the live profile.
+The similarity is inner product. Embeddings are not L2-normalized, so documentation and
+resume language must not call it cosine retrieval.
 
-## Item-Ranking Recall@K and NDCG@K
+## Reproduce
 
-**Definition** - sort the demo user's replay events by `event_ts` and split
-80/20 by cumulative count. POST every train event to the live backend so the
-profile reaches its train-period state. Take a single `/feed?page_size=K`
-snapshot at the boundary; this ordered list of `answer_id`s is the
-prediction. For each test event $e_i$ that carries an `answer_id` $a_i$:
+Build data and train artifacts before starting the API:
 
-$$
-\mathrm{hit}_i = \mathbb{1}[a_i \in F_K], \qquad
-\mathrm{Recall@}K_i = \mathrm{hit}_i, \qquad
-\mathrm{NDCG@}K_i = \begin{cases} 1/\log_2(\mathrm{rank}_i + 1) & \mathrm{hit}_i = 1 \\ 0 & \mathrm{otherwise} \end{cases}
-$$
+```bash
+export ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo'
+export ZHIHUREC_DEMO_SEED_DIR=build/demo_world
+export ZHIHUREC_EVENT_MODE=sync_mysql
 
-with $\mathrm{rank}_i$ 1-indexed. Aggregate as means across all scored test
-clicks. Implementation: `backend/app/evaluate.py` (`time_split`, `recall_at_k`,
-`ndcg_at_k`); driver: `scripts/eval_offline_metrics.py`.
+python scripts/build_demo_world.py
+python scripts/import_demo_world.py --truncate-first
+python scripts/apply_demo_mysql.py
+python scripts/train_lgb_ranker.py --train-ratio 0.8
+python scripts/train_als_recall.py --train-ratio 0.8
 
-**Why this is the system-level baseline** - Carryover Gain@K probes one
-specific cross-surface signal (search reshapes feed). Recall@K / NDCG@K asks
-the blunter question: does the unconditioned top-K feed predict the user's
-next click at all? Every future ranking change should report
-$\Delta$Recall@10 and $\Delta$NDCG@10 against the baseline below.
-
-**Caveats**
-
-- *Single-snapshot, not leave-one-out*: every test click is scored against
-  the same top-K computed at `split_ts`, not a per-event live top-K. This is
-  a fast, conservative baseline; leave-one-out per click is the documented
-  upgrade path.
-- *Single-user demo*: the demo world has one active user (7248). These are
-  per-event item-ranking metrics, not cross-user collaborative-filtering
-  numbers. Multi-user metrics require a different demo seed and are out of
-  scope here.
-- *Candidate ceiling*: `candidate_recall_at_k_observed` is reported with
-  `--candidate-k 50` (default; capped by `/feed?page_size <= 50` in
-  `backend/app/routers/feed.py:15`). It is **not** a true candidate-pool
-  recall (the internal pool is ~1000 items) - it's "of the top 50 ranked
-  items, how many test clicks are present?" Still useful: if Recall@10 is
-  low while Recall@50 is high, the ranker is the bottleneck; if both are
-  low, retrieval depth is the ceiling.
-
-**Run**
-
-```powershell
-docker compose up -d
-$env:ZHIHUREC_DATABASE_URL = 'mysql+pymysql://root:root@localhost:3306/zhihurec_demo'
-& 'C:\ProgramData\anaconda3\python.exe' scripts\apply_demo_mysql.py
-# in a second window:
-& 'C:\ProgramData\anaconda3\python.exe' -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-# then back in the first window (the script will call reset_demo_user.py itself):
-& 'C:\ProgramData\anaconda3\python.exe' scripts\eval_offline_metrics.py --k 10 --train-ratio 0.8
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
-## Historical baselines (Recall@K / NDCG@K)
+Then, in another terminal:
 
-| Date       | K  | Train ratio | Recall@K | NDCG@K | Test clicks | candidate_recall@50 | Notes |
-|------------|----|-------------|----------|--------|-------------|---------------------|-------|
-| 2026-05-16 | 10 | 0.8         | 0.0000   | 0.0000 | 19          | 0.1579              | First baseline: 0/19 of test-period clicked answers appear in the warmed-profile top-10; 3/19 (15.79%) appear in top-50. Train slice posted 97 events (61 rec_click / 15 search / 21 s-click). System surfaces topic-aligned items (carryover@10 = 1.0) but does not yet predict the specific next-clicked `answer_id`; the next hop is to lift retrieval depth, not ranking weights. |
-| 2026-05-17 | 10 | 0.8         | 0.0833   | 0.0315 | 60          | 0.1667              | V1.5 live rerun against the running MySQL backend with LightGBM and ALS artifacts present. Train slice posted 258 events (101 rec_click / 55 search / 102 search-result click), request_failures = 0, and 5/60 test clicks landed in top-10. Treat this as promising prototype evidence, not an isolated model ablation. |
+```bash
+python scripts/eval_offline_metrics.py \
+  --base-url http://127.0.0.1:8000 \
+  --replay build/demo_world/demo_event_replay.jsonl \
+  --evaluation-seeds build/demo_world/evaluation_persona_profile_seeds.json \
+  --model-dir build \
+  --train-ratio 0.8 \
+  --k 10 \
+  --candidate-k 50
 
-## Interpretation
+python scripts/eval_replay_metrics.py \
+  --base-url http://127.0.0.1:8000 \
+  --replay build/demo_world/demo_event_replay.jsonl \
+  --topic-map build/demo_world/query_topic_map.jsonl \
+  --evaluation-seeds build/demo_world/evaluation_persona_profile_seeds.json \
+  --model-dir build \
+  --k 10 \
+  --experiment-arm lgb_plus_als_plus_search
+```
 
-- `recall@10 >= 0.30` - feed strongly predicts the next click; quotable.
-- `0.10 <= recall@10 < 0.30` - signal present, room to grow.
-- `recall@10 < 0.10` and `candidate_recall@50 >= 0.30` - the ranker is the
-  bottleneck (the answer is in the top 50 but not in the top 10).
-- `recall@10 < 0.10` and `candidate_recall@50 < 0.10` - retrieval depth is
-  the ceiling (the answer is not even in the top 50, so topic-based
-  candidate retrieval needs lifting first).
+Both evaluators reject asynchronous event mode, verify the backend's loaded artifact
+fingerprints, preserve event `user_id`, reset each persona to the replay-start seed, and
+report request failures. Any nonzero failure count invalidates the run.
+
+## Historical numbers
+
+Earlier documents reported a 121-event single-user Carryover Gain@10 of `+0.1000` and
+single-snapshot ranking metrics. Those values are retained only in Git history because
+their protocol no longer matches the current three-persona, item-impression-aware
+evaluation.

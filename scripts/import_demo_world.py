@@ -37,10 +37,23 @@ REQUIRED_INPUTS = [
 OPTIONAL_INPUTS = [
     "demo_persona_profile_seeds.json",
     "demo_personas.json",
+    "sponsored_campaign.jsonl",
+    "sponsored_campaign_topic.jsonl",
+    "sponsored_creative.jsonl",
+    "evaluation_default_profile_seed.json",
 ]
 
 DELETE_ORDER = [
+    "event_outbox",
     "user_event",
+    "event_idempotency",
+    "feed_request",
+    "sponsored_delivery",
+    "sponsored_user_daily_frequency",
+    "sponsored_campaign_daily_state",
+    "sponsored_creative",
+    "sponsored_campaign_topic",
+    "sponsored_campaign",
     "user_profile",
     "system_profile_seed",
     "hot_answer_snapshot",
@@ -52,6 +65,7 @@ DELETE_ORDER = [
     "app_user",
     "author",
     "topic",
+    "worker_heartbeat",
 ]
 
 
@@ -71,11 +85,6 @@ def parse_args() -> argparse.Namespace:
         / "demo_world"
         / "import_demo_world.sql",
         help="Output SQL file to write.",
-    )
-    parser.add_argument(
-        "--database",
-        default="zhihurec_demo",
-        help="Database name to emit in the USE statement.",
     )
     parser.add_argument(
         "--batch-size",
@@ -171,7 +180,15 @@ def max_defined(values: Iterable[int | None]) -> int | None:
 
 
 def infer_surface(event_type: str) -> str:
-    if event_type == "recommendation_click":
+    if event_type in {
+        "recommendation_click",
+        "feed_impression",
+        "detail_view",
+        "dwell",
+        "upvote",
+        "downvote",
+        "share",
+    }:
         return "feed"
     return "search"
 
@@ -340,17 +357,24 @@ def build_hot_answer_rows(input_dir: Path) -> List[Tuple[object, ...]]:
 
 
 def build_system_profile_seed_rows(input_dir: Path) -> List[Tuple[object, ...]]:
-    row = load_json(input_dir / "default_profile_seed.json")
-    return [
-        (
-            row["seed_key"],
-            to_json_text(row.get("topic_weights", [])),
-            to_json_text(row.get("recent_clicked_answers", [])),
-            to_json_text(row.get("recent_queries", [])),
-            row.get("behavior_score", 0),
-            row.get("notes"),
+    paths = [input_dir / "default_profile_seed.json"]
+    evaluation_path = input_dir / "evaluation_default_profile_seed.json"
+    if evaluation_path.exists():
+        paths.append(evaluation_path)
+    rows: List[Tuple[object, ...]] = []
+    for path in paths:
+        row = load_json(path)
+        rows.append(
+            (
+                row["seed_key"],
+                to_json_text(row.get("topic_weights", [])),
+                to_json_text(row.get("recent_clicked_answers", [])),
+                to_json_text(row.get("recent_queries", [])),
+                row.get("behavior_score", 0),
+                row.get("notes"),
+            )
         )
-    ]
+    return rows
 
 
 def build_user_profile_rows(input_dir: Path) -> List[Tuple[object, ...]]:
@@ -399,14 +423,19 @@ def build_user_event_rows(input_dir: Path) -> List[Tuple[object, ...]]:
             query_key = row.get("matched_query_key")
         rows.append(
             (
+                row.get("event_id"),
                 row["user_id"],
                 row["event_type"],
                 row.get("answer_id"),
+                row.get("sponsored_delivery_id"),
+                row.get("campaign_id"),
+                row.get("creative_id"),
                 query_key,
                 to_json_text(row.get("query_tokens")),
                 to_json_text(row.get("topic_ids")),
-                infer_surface(row["event_type"]),
+                row.get("surface") or infer_surface(row["event_type"]),
                 row.get("request_id"),
+                row.get("dwell_ms"),
                 1,
                 row.get("source_confidence", "not_applicable"),
                 row["event_ts"],
@@ -414,6 +443,50 @@ def build_user_event_rows(input_dir: Path) -> List[Tuple[object, ...]]:
             )
         )
     return rows
+
+
+def build_sponsored_campaign_rows(input_dir: Path) -> List[Tuple[object, ...]]:
+    path = input_dir / "sponsored_campaign.jsonl"
+    if not path.exists():
+        return []
+    return [
+        (
+            row["campaign_id"],
+            row["campaign_name"],
+            row.get("status", "active"),
+            row["start_ts"],
+            row["end_ts"],
+            row["daily_budget_micros"],
+            row.get("pacing_mode", "even"),
+            row.get("frequency_cap_per_user_per_day", 2),
+        )
+        for row in iter_jsonl(path)
+    ]
+
+
+def build_sponsored_campaign_topic_rows(input_dir: Path) -> List[Tuple[object, ...]]:
+    path = input_dir / "sponsored_campaign_topic.jsonl"
+    if not path.exists():
+        return []
+    return [(row["campaign_id"], row["topic_id"]) for row in iter_jsonl(path)]
+
+
+def build_sponsored_creative_rows(input_dir: Path) -> List[Tuple[object, ...]]:
+    path = input_dir / "sponsored_creative.jsonl"
+    if not path.exists():
+        return []
+    return [
+        (
+            row["creative_id"],
+            row["campaign_id"],
+            row["answer_id"],
+            row.get("status", "active"),
+            row["bid_micros"],
+            row["predicted_ctr"],
+            row["quality_score"],
+        )
+        for row in iter_jsonl(path)
+    ]
 
 
 def build_table_payloads(
@@ -573,16 +646,53 @@ def build_table_payloads(
             build_user_profile_rows(input_dir),
         ),
         (
+            "sponsored_campaign",
+            [
+                "campaign_id",
+                "campaign_name",
+                "status",
+                "start_ts",
+                "end_ts",
+                "daily_budget_micros",
+                "pacing_mode",
+                "frequency_cap_per_user_per_day",
+            ],
+            build_sponsored_campaign_rows(input_dir),
+        ),
+        (
+            "sponsored_campaign_topic",
+            ["campaign_id", "topic_id"],
+            build_sponsored_campaign_topic_rows(input_dir),
+        ),
+        (
+            "sponsored_creative",
+            [
+                "creative_id",
+                "campaign_id",
+                "answer_id",
+                "status",
+                "bid_micros",
+                "predicted_ctr",
+                "quality_score",
+            ],
+            build_sponsored_creative_rows(input_dir),
+        ),
+        (
             "user_event",
             [
+                "external_event_id",
                 "user_id",
                 "event_type",
                 "answer_id",
+                "sponsored_delivery_id",
+                "campaign_id",
+                "creative_id",
                 "query_key",
                 "query_tokens_json",
                 "topic_ids_json",
                 "surface",
                 "request_id",
+                "dwell_ms",
                 "derived_from_raw",
                 "source_confidence",
                 "event_ts",
@@ -595,7 +705,6 @@ def build_table_payloads(
 
 def render_sql(
     output_path: Path,
-    database: str,
     manifest: dict,
     table_payloads: Sequence[Tuple[str, Sequence[str], List[Tuple[object, ...]]]],
     batch_size: int,
@@ -610,7 +719,6 @@ def render_sql(
         handle.write(f"-- Source import pack: {manifest.get('output_dir', 'build/demo_world')}\n")
         handle.write(f"-- Demo user ID: {manifest.get('demo_user_id')}\n\n")
         handle.write("SET NAMES utf8mb4;\n")
-        handle.write(f"USE {database};\n")
         handle.write("START TRANSACTION;\n\n")
 
         if truncate_first:
@@ -632,7 +740,6 @@ def main() -> None:
     table_payloads = build_table_payloads(args.input_dir)
     render_sql(
         output_path=args.output_sql,
-        database=args.database,
         manifest=manifest,
         table_payloads=table_payloads,
         batch_size=args.batch_size,

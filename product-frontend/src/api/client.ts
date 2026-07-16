@@ -13,6 +13,24 @@ const BASE_URL: string =
   (import.meta.env.VITE_ZHIHUREC_API_BASE as string | undefined)?.trim() ||
   "http://127.0.0.1:8000";
 
+export function newClientId(prefix: string): string {
+  const randomPart =
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${randomPart}`;
+}
+
+const stableClientIds = new Map<string, string>();
+
+export function stableClientId(prefix: string, logicalKey: string): string {
+  const cacheKey = `${prefix}:${logicalKey}`;
+  const existing = stableClientIds.get(cacheKey);
+  if (existing) return existing;
+  const created = newClientId(prefix);
+  stableClientIds.set(cacheKey, created);
+  return created;
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit & { params?: Record<string, string | number | boolean | undefined> },
@@ -44,9 +62,14 @@ export function listSearchSuggestions(limit = 12): Promise<SuggestionListRespons
   return request<SuggestionListResponse>("/search/suggestions", { params: { limit } });
 }
 
-export function getFeed(userId: number, pageSize = 10, debug = false): Promise<FeedResponse> {
+export function getFeed(
+  userId: number,
+  pageSize = 10,
+  debug = false,
+  requestId?: string,
+): Promise<FeedResponse> {
   return request<FeedResponse>("/feed", {
-    params: { user_id: userId, page_size: pageSize, debug },
+    params: { user_id: userId, page_size: pageSize, debug, request_id: requestId },
   });
 }
 
@@ -59,11 +82,13 @@ export function postSearch(
   userId: number,
   input: SearchInput,
   pageSize = 10,
+  eventId?: string,
 ): Promise<SearchResponse> {
   return request<SearchResponse>("/search", {
     method: "POST",
     body: JSON.stringify({
       user_id: userId,
+      event_id: eventId,
       query_text: input.queryText,
       query_key: input.queryKey,
       page_size: pageSize,

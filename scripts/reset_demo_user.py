@@ -21,6 +21,7 @@ class MysqlUrl:
 
 
 def parse_args() -> argparse.Namespace:
+    seed_dir = os.getenv("ZHIHUREC_DEMO_SEED_DIR", "build/demo_world")
     parser = argparse.ArgumentParser(
         description=(
             "Reset ZhihuRec demo user profiles. By default all personas in the "
@@ -29,12 +30,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--profile-seed",
-        default="build/demo_world/demo_user_profile_seed.json",
+        default=f"{seed_dir}/demo_user_profile_seed.json",
         help="Legacy single-persona demo user profile seed JSON.",
     )
     parser.add_argument(
         "--persona-seeds",
-        default="build/demo_world/demo_persona_profile_seeds.json",
+        default=f"{seed_dir}/demo_persona_profile_seeds.json",
         help="Multi-persona demo user profile seed JSON (preferred when present).",
     )
     parser.add_argument(
@@ -103,9 +104,16 @@ def load_seeds(persona_seeds_path: Path, legacy_seed_path: Path) -> list[dict]:
     if legacy_seed_path.exists():
         payload = json.loads(legacy_seed_path.read_text(encoding="utf-8"))
         return [payload]
-    raise SystemExit(
-        f"no profile seed found: tried {persona_seeds_path} and {legacy_seed_path}"
-    )
+    fixture_personas = ROOT / "build" / "demo_fixture" / "demo_persona_profile_seeds.json"
+    fixture_legacy = ROOT / "build" / "demo_fixture" / "demo_user_profile_seed.json"
+    if fixture_personas.exists():
+        payload = json.loads(fixture_personas.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise SystemExit(f"{fixture_personas} must contain a JSON list")
+        return payload
+    if fixture_legacy.exists():
+        return [json.loads(fixture_legacy.read_text(encoding="utf-8"))]
+    raise SystemExit("no profile seed found in the full demo world or compact fixture")
 
 
 def filter_seeds(seeds: Iterable[dict], user_id: int | None) -> list[dict]:
@@ -161,6 +169,87 @@ def reset_one(cursor, seed: dict) -> tuple[int, int, int]:
             last_event_ts,
         ),
     )
+    cursor.execute(
+        """
+        SELECT external_event_id
+        FROM user_event
+        WHERE user_id = %s
+          AND derived_from_raw = 0
+          AND external_event_id IS NOT NULL
+        """,
+        (seed["user_id"],),
+    )
+    runtime_event_ids = [
+        str(row["external_event_id"]) for row in cursor.fetchall() if row.get("external_event_id")
+    ]
+    if runtime_event_ids:
+        placeholders = ",".join(["%s"] * len(runtime_event_ids))
+        cursor.execute(
+            f"DELETE FROM event_outbox WHERE event_id IN ({placeholders})",
+            tuple(runtime_event_ids),
+        )
+    cursor.execute(
+        "DELETE FROM user_event WHERE user_id = %s AND derived_from_raw = 0",
+        (seed["user_id"],),
+    )
+    cursor.execute(
+        "DELETE FROM event_idempotency WHERE user_id = %s",
+        (seed["user_id"],),
+    )
+    cursor.execute(
+        "DELETE FROM feed_request WHERE user_id = %s",
+        (seed["user_id"],),
+    )
+    cursor.execute(
+        """
+        SELECT
+          campaign_id,
+          budget_date,
+          SUM(expected_spend_micros) AS expected_spend_micros,
+          COUNT(*) AS served_impression_count,
+          SUM(confirmed_impression_ts IS NOT NULL) AS confirmed_impression_count,
+          SUM(clicked_ts IS NOT NULL) AS click_count
+        FROM sponsored_delivery
+        WHERE user_id = %s
+        GROUP BY campaign_id, budget_date
+        """,
+        (seed["user_id"],),
+    )
+    delivery_totals = list(cursor.fetchall())
+    cursor.execute("DELETE FROM sponsored_delivery WHERE user_id = %s", (seed["user_id"],))
+    cursor.execute(
+        "DELETE FROM sponsored_user_daily_frequency WHERE user_id = %s",
+        (seed["user_id"],),
+    )
+    for totals in delivery_totals:
+        cursor.execute(
+            """
+            UPDATE sponsored_campaign_daily_state
+            SET
+              expected_spend_micros = GREATEST(
+                0,
+                expected_spend_micros - %s
+              ),
+              served_impression_count = GREATEST(
+                0,
+                served_impression_count - %s
+              ),
+              confirmed_impression_count = GREATEST(
+                0,
+                confirmed_impression_count - %s
+              ),
+              click_count = GREATEST(0, click_count - %s)
+            WHERE campaign_id = %s AND budget_date = %s
+            """,
+            (
+                int(totals.get("expected_spend_micros") or 0),
+                int(totals.get("served_impression_count") or 0),
+                int(totals.get("confirmed_impression_count") or 0),
+                int(totals.get("click_count") or 0),
+                int(totals["campaign_id"]),
+                totals["budget_date"],
+            ),
+        )
     return seed["user_id"], len(recent_clicks), len(recent_queries)
 
 

@@ -1,1 +1,1 @@
-"""API routers for the ZhihuRec backend skeleton."""
+"""API routers for the ZhihuRec backend."""

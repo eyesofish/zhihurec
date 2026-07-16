@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -36,7 +38,13 @@ def parse_database_url(database_url: str) -> MysqlConnectionConfig:
     )
 
 
-def connect(config: MysqlConnectionConfig) -> Any:
+def connect(
+    config: MysqlConnectionConfig,
+    *,
+    connect_timeout: int = 5,
+    read_timeout: int = 10,
+    write_timeout: int = 10,
+) -> Any:
     import pymysql
     import pymysql.cursors
 
@@ -49,4 +57,62 @@ def connect(config: MysqlConnectionConfig) -> Any:
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=True,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        write_timeout=write_timeout,
     )
+
+
+class MysqlConnectionPool:
+    def __init__(
+        self,
+        config: MysqlConnectionConfig,
+        *,
+        connect_timeout: int = 5,
+        read_timeout: int = 10,
+        write_timeout: int = 10,
+        min_cached: int = 1,
+        max_cached: int = 5,
+        max_connections: int = 10,
+    ) -> None:
+        import pymysql
+        import pymysql.cursors
+        from dbutils.pooled_db import PooledDB  # type: ignore[import-untyped]
+
+        self._pool: Any = PooledDB(
+            creator=pymysql,
+            mincached=max(0, min_cached),
+            maxcached=max(0, max_cached),
+            maxconnections=max(1, max_connections),
+            blocking=True,
+            ping=1,
+            host=config.host,
+            port=config.port,
+            user=config.user,
+            password=config.password,
+            database=config.database,
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=True,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            write_timeout=write_timeout,
+        )
+
+    def connect(self) -> Any:
+        return self._pool.connection()
+
+    def close(self) -> None:
+        self._pool.close()
+
+
+@contextmanager
+def transaction(connection: Any) -> Iterator[Any]:
+    connection.begin()
+    try:
+        yield connection
+    except Exception:
+        connection.rollback()
+        raise
+    else:
+        connection.commit()

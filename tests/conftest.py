@@ -57,9 +57,9 @@ def _database_url() -> str:
     return os.environ.get("ZHIHUREC_DATABASE_URL", "").strip()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def mysql_demo_user() -> int:
-    """Reset demo user 7248 once per test session so behavior_score deltas are predictable."""
+    """Reset demo user 7248 before each test so mutable state is predictable."""
     if not _database_url():
         pytest.skip("ZHIHUREC_DATABASE_URL not set")
     subprocess.run(

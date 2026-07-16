@@ -12,6 +12,7 @@ Usage in mysql.py scoring loop:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,26 +20,59 @@ import lightgbm as lgb
 
 _MODEL: lgb.Booster | None = None
 _FEATURE_ORDER: list[str] = []
+_METADATA: dict[str, Any] = {}
+_MODEL_SIGNATURE: tuple[int, int] | None = None
+FEATURE_SCHEMA_VERSION = 2
+RANKER_FEATURE_COLUMNS = (
+    "base_score",
+    "personalized_topic_score",
+    "default_topic_score",
+    "topic_match_score",
+    "query_recall_boost",
+    "user_behavior_score",
+    "user_topic_count",
+    "answer_hot_score",
+    "answer_click_count",
+    "answer_impression_count",
+    "answer_age_hours",
+    "answer_has_picture",
+    "answer_has_video",
+    "answer_is_high_value",
+    "answer_is_editor_recommended",
+    "author_is_excellent_answerer",
+)
 
 
 def load_model(model_dir: str | None = None) -> lgb.Booster | None:
-    global _MODEL, _FEATURE_ORDER
-    if _MODEL is not None:
-        return _MODEL
-
-    base = Path(model_dir or "build")
+    global _MODEL, _FEATURE_ORDER, _METADATA, _MODEL_SIGNATURE
+    base = Path(model_dir or os.getenv("ZHIHUREC_MODEL_DIR") or "build")
     model_path = base / "lgb_ranker_v1.txt"
     meta_path = base / "lgb_ranker_v1_meta.json"
 
-    if not model_path.exists():
+    if not model_path.exists() or not meta_path.exists():
         return None  # model not trained yet — caller should fall back
 
+    signature = (model_path.stat().st_mtime_ns, meta_path.stat().st_mtime_ns)
+    if _MODEL is not None and signature == _MODEL_SIGNATURE:
+        return _MODEL
+
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    features = metadata.get("features", [])
+    if metadata.get("feature_schema_version") != FEATURE_SCHEMA_VERSION:
+        return None
+    if features != list(RANKER_FEATURE_COLUMNS):
+        return None
+
     _MODEL = lgb.Booster(model_file=str(model_path))
-
-    if meta_path.exists():
-        _FEATURE_ORDER = json.loads(meta_path.read_text(encoding="utf-8")).get("features", [])
-
+    _FEATURE_ORDER = features
+    _METADATA = metadata
+    _MODEL_SIGNATURE = signature
     return _MODEL
+
+
+def loaded_model_metadata() -> dict[str, Any]:
+    load_model()
+    return dict(_METADATA)
 
 
 def score_candidates(feature_dicts: list[dict[str, float]]) -> list[float] | None:
@@ -77,6 +111,9 @@ def build_feature_dict(
     now_ts: float | None = None,
     user_behavior_score: float = 0.0,
     user_topic_count: int = 0,
+    answer_hot_score: float | None = None,
+    answer_click_count: int | None = None,
+    answer_impression_count: int | None = None,
 ) -> dict[str, float]:
     """Build one feature dict matching the training feature columns.
 
@@ -84,7 +121,12 @@ def build_feature_dict(
     feature distribution stays aligned with training.
     """
     import time as _time
-    hot = float(answer_row.get("hot_score") or 0)
+
+    hot = (
+        float(answer_hot_score)
+        if answer_hot_score is not None
+        else float(answer_row.get("hot_score") or 0)
+    )
     personalized = sum(topic_weight_map.get(tid, 0.0) for tid in topic_ids)
     default_ts = sum(default_topic_weight_map.get(tid, 0.0) for tid in topic_ids)
     topic_match = alpha * personalized + (1.0 - alpha) * default_ts
@@ -103,15 +145,20 @@ def build_feature_dict(
         "user_behavior_score": round(user_behavior_score, 6),
         "user_topic_count": int(user_topic_count),
         "answer_hot_score": round(hot, 6),
-        "answer_click_count": int(answer_row.get("click_count") or 0),
-        "answer_impression_count": int(answer_row.get("impression_count") or 0),
+        "answer_click_count": (
+            int(answer_click_count)
+            if answer_click_count is not None
+            else int(answer_row.get("click_count") or 0)
+        ),
+        "answer_impression_count": (
+            int(answer_impression_count)
+            if answer_impression_count is not None
+            else int(answer_row.get("impression_count") or 0)
+        ),
         "answer_age_hours": round(age_hours, 2),
         "answer_has_picture": int(answer_row.get("has_picture") or 0),
         "answer_has_video": int(answer_row.get("has_video") or 0),
         "answer_is_high_value": int(answer_row.get("is_high_value") or 0),
         "answer_is_editor_recommended": int(answer_row.get("is_editor_recommended") or 0),
-        "answer_likes_count": int(answer_row.get("likes_count") or 0),
-        "answer_collection_count": int(answer_row.get("collection_count") or 0),
         "author_is_excellent_answerer": int(answer_row.get("is_excellent_answerer") or 0),
-        "author_follower_count": float(answer_row.get("author_follower_count") or 0.0),
     }

@@ -50,6 +50,14 @@ export interface FeedItemScores {
   topic_match_score: number;
   query_recall_boost: number;
   final_score: number;
+  sponsored_score?: number | null;
+}
+
+export interface SponsoredFeedMetadata {
+  delivery_id: string;
+  campaign_id: number;
+  creative_id: number;
+  label: string;
 }
 
 export interface FeedItem {
@@ -63,6 +71,8 @@ export interface FeedItem {
   scores: FeedItemScores;
   recall_sources: string[];
   is_fallback: boolean;
+  content_type: "organic" | "sponsored";
+  sponsored?: SponsoredFeedMetadata | null;
 }
 
 export interface FeedResponse {
@@ -89,6 +99,7 @@ export interface SearchItem {
 
 export interface SearchResponse {
   user_id: number;
+  request_id: string;
   query_key: string;
   items: SearchItem[];
   debug?: unknown;
@@ -130,12 +141,14 @@ export type EventTrackType =
   | "search_result_click";
 
 export interface EventTrackRequest {
+  event_id?: string | null;
   user_id: number;
   event_type: EventTrackType;
   surface: string;
   answer_id?: number | null;
   query_key?: string | null;
   request_id?: string | null;
+  sponsored_delivery_id?: string | null;
   dwell_ms?: number | null;
   debug?: boolean;
 }

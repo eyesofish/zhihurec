@@ -1,154 +1,180 @@
-# ZhihuRec V1 Local Runbook
+# ZhihuRec Local Runbook
 
-## 0. One-Shot Local Bootstrap
+## Prerequisites
 
-```powershell
-.\scripts\init_local.ps1
+- Python 3.13;
+- Docker with Compose;
+- Node.js 20+ for the product frontend.
+
+Install dependencies:
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements-dev.txt
+cd product-frontend && npm ci && cd ..
 ```
 
-This runs the local demo setup in one path: starts MySQL via Docker Compose, applies schema and demo seed data, resets the demo user, starts the FastAPI backend on `http://127.0.0.1:8000`, and starts the static debug frontend on `http://127.0.0.1:5173`.
+PowerShell can use the equivalent environment Python path.
 
-For a non-interactive verification run that starts backend/frontend, checks the endpoints, and then stops only those child processes:
+## One-command paths
+
+macOS/Linux:
+
+```bash
+PYTHON=.venv/bin/python scripts/init_local.sh --product-frontend
+PYTHON=.venv/bin/python scripts/init_local.sh --smoke-test
+PYTHON=.venv/bin/python scripts/init_local.sh --smoke-test --with-kafka
+```
+
+Windows:
 
 ```powershell
+.\scripts\init_local.ps1 -ProductFrontend
 .\scripts\init_local.ps1 -SmokeTest
+.\scripts\init_local.ps1 -SmokeTest -WithKafka
 ```
 
-Use the explicit per-step flow below only when debugging one part of the setup.
+The wrappers:
 
-## 1. Install Backend Dependencies
+1. start MySQL;
+2. optionally start Kafka and create topics;
+3. apply schema and seed;
+4. reset all personas;
+5. start API and optional workers/frontends;
+6. run `scripts/smoke_local.py`;
+7. stop only child PIDs created by a smoke run.
 
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' -m pip install -r backend\requirements.txt
+MySQL/Kafka containers remain available until explicitly stopped.
+
+## Demo data selection
+
+`scripts/apply_demo_mysql.py` first uses
+`build/demo_world/import_demo_world.sql`.
+
+If that ignored full-data artifact is missing, it generates
+`build/demo_fixture` through `scripts/build_demo_fixture.py` and imports the compact
+three-persona fixture. This makes fresh-clone CI and review setup reproducible without
+committing the original dataset.
+
+Rebuild the full local world:
+
+```bash
+python scripts/build_demo_world.py
+python scripts/import_demo_world.py \
+  --input-dir build/demo_world \
+  --output-sql build/demo_world/import_demo_world.sql \
+  --truncate-first
 ```
 
-## 2. Regenerate Import SQL
+Then apply:
 
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' scripts\import_demo_world.py --input-dir build\demo_world --output-sql build\demo_world\import_demo_world.sql --truncate-first
+```bash
+export ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo'
+python scripts/apply_demo_mysql.py
+python scripts/reset_demo_user.py
 ```
 
-Expected output includes:
+Use `ZHIHUREC_DEMO_SEED_DIR=build/demo_fixture` when explicitly testing the compact
+fixture on a machine that also has the full build.
 
-```text
-44690 row(s) across 12 table payload(s)
-```
+## Manual synchronous stack
 
-## 2.5 Start MySQL via Docker Compose
-
-The repo ships a `docker-compose.yml` at root that brings up `mysql:8.0` on `127.0.0.1:3306` with database `zhihurec_demo`, account `root/root`, and a named volume for persistence.
-
-```powershell
+```bash
 docker compose up -d
-do { Start-Sleep -Seconds 3; $s = docker inspect -f '{{.State.Health.Status}}' zhihurec-mysql 2>$null; "status=$s" } while ($s -ne 'healthy')
+export ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo'
+export ZHIHUREC_EVENT_MODE=sync_mysql
+python scripts/apply_demo_mysql.py
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Stop later with:
+Start the product frontend:
 
-```powershell
-docker compose down       # keep volume
-docker compose down -v    # nuke volume too
-```
-
-If you already have a local MySQL running, you can skip this section and use the URL it exposes in §3 below.
-
-## 3. Configure MySQL
-
-```powershell
-$env:ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@localhost:3306/zhihurec_demo'
-```
-
-## 4. Initialize Database
-
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' scripts\apply_demo_mysql.py
-& 'C:\ProgramData\anaconda3\python.exe' scripts\reset_demo_user.py
-```
-
-Use this dry-run check before connecting to MySQL:
-
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' scripts\apply_demo_mysql.py --dry-run
-```
-
-## 5. Start Backend
-
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-```
-
-## 6. Smoke Checks
-
-```powershell
-Invoke-RestMethod 'http://127.0.0.1:8000/healthz'
-Invoke-RestMethod 'http://127.0.0.1:8000/debug/profile?user_id=7248'
-Invoke-RestMethod 'http://127.0.0.1:8000/feed?user_id=7248&page_size=10&debug=true'
-```
-
-For search, use a known key from `build\demo_world\demo_user_profile_seed.json`, such as a value in `recent_queries`.
-
-## 7. Start Frontend
-
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' -m http.server 5173 -d frontend
-```
-
-Open:
-
-```text
-http://127.0.0.1:5173
-```
-
-## 8. Product Frontend (React/Vite/TS)
-
-The product frontend at `product-frontend/` is a Reddit-inspired React app that demonstrates the full persona → feed → search → upvote → profile loop.
-
-### 8.1 Install & Build
-
-```powershell
-cd product-frontend
-npm install
-npm run build
-```
-
-### 8.2 Start Dev Server
-
-```powershell
+```bash
 cd product-frontend
 npm run dev -- --host 127.0.0.1 --port 5174
 ```
 
-Open:
+## Manual Kafka stack
 
-```text
-http://127.0.0.1:5174
+```bash
+docker compose up -d
+docker compose -f docker-compose.kafka.yml up -d
+
+export ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo'
+export ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS='127.0.0.1:9092'
+export ZHIHUREC_EVENT_MODE=kafka_dual_write
+
+python scripts/run_outbox_publisher.py
+python scripts/run_profile_consumer.py
 ```
 
-The backend must be running at `http://127.0.0.1:8000` with `ZHIHUREC_DATABASE_URL` configured. The Vite dev server proxies nothing; all API calls go directly to the backend via the base URL in `product-frontend/src/api/client.ts`.
+Run the API in another terminal. For `kafka_async`, change the event mode; the API then
+durably stages raw events in MySQL Outbox and the consumer owns profile mutation.
 
-### 8.3 One-Shot with init_local.ps1
+## Health and smoke checks
 
-```powershell
-.\scripts\init_local.ps1 -ProductFrontend
+```bash
+curl -fsS http://127.0.0.1:8000/livez
+curl -fsS http://127.0.0.1:8000/readyz
+curl -fsS http://127.0.0.1:8000/healthz
+curl -fsS http://127.0.0.1:8000/metrics
+
+python scripts/smoke_local.py --base-url http://127.0.0.1:8000
 ```
 
-This starts MySQL, the backend on 8000, the debug frontend on 5173, and the product frontend on 5174 in a single command.
+`/livez` is process-only. `/readyz` and `/healthz` return 503 if required MySQL/Kafka
+dependencies fail or the outbox is unhealthy.
 
-### 8.4 Walkthrough
+Worker metrics:
 
-1. **Persona switch** — click the persona avatar (top-right) to switch between demo users. Feed and profile panel update automatically.
-2. **Feed** — scroll through personalised feed cards. Each shows community badge, title (link to detail), summary, topic chips, and selection reason.
-3. **Search** — type in the top search box, select a suggestion, or press Enter. Results page shows keyword-matched answers.
-4. **Post detail** — click a card title to see the full answer card with back-to-feed navigation.
-5. **Upvote** — click the up arrow on any card. The event is tracked and profile weights update (visible in the right-rail Profile Debug panel).
-6. **Profile debug + D3 chart** — the right rail shows behavior score, cold-start seed, a D3 topic-weight bar chart, numeric topic weights, and recent clicks from `/debug/profile`. Search, click, and upvote events trigger profile refreshes, so the chart is the main visual proof that the profile is changing.
+- profile consumer: `http://127.0.0.1:9101/`;
+- outbox publisher: `http://127.0.0.1:9102/`.
 
-The debug frontend at `http://127.0.0.1:5173` remains available and unaffected.
+## Product walkthrough
 
-## 9. Replay Events
+1. Switch among the three personas.
+2. Inspect organic and clearly labeled sponsored cards.
+3. Search from the top navigation.
+4. Click a search result or feed item.
+5. Observe topic weights, behavior score, recent query/click state, and recall reasons.
+6. Refresh the feed and compare topic alignment.
 
-```powershell
-& 'C:\ProgramData\anaconda3\python.exe' scripts\replay_demo_events.py --limit 10
+Each visible feed answer sends an idempotent item-level impression containing user,
+request, answer, and optional sponsored delivery identity.
+
+## Training and evaluation
+
+Stop the API, train both artifacts from the same 80% request partition, then restart the
+API in `sync_mysql` mode before evaluating:
+
+```bash
+python scripts/train_lgb_ranker.py --train-ratio 0.8
+python scripts/train_als_recall.py --train-ratio 0.8
+python scripts/eval_offline_metrics.py --k 10 --candidate-k 50
+python scripts/eval_replay_metrics.py --k 10
 ```
 
-After replay, call `/debug/profile` again and check that `recent_queries`, `recent_clicked_answers`, or `behavior_score` changed.
+See `docs/v1_metrics.md` before interpreting results.
+
+## Test layers
+
+```bash
+python -m pytest -q
+
+ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo' \
+  python -m pytest -q -m "mysql and not kafka"
+
+ZHIHUREC_DATABASE_URL='mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo' \
+ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS='127.0.0.1:9092' \
+ZHIHUREC_EVENT_MODE=kafka_async \
+  python -m pytest -q -m kafka
+```
+
+## Stop dependencies
+
+```bash
+docker compose -f docker-compose.kafka.yml down
+docker compose down
+```
+
+Add `-v` only when intentionally deleting local volumes.

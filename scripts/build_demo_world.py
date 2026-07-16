@@ -60,7 +60,10 @@ def parse_args() -> argparse.Namespace:
         help="Directory where derived bridge artifacts will be written.",
     )
     parser.add_argument(
-        "--demo-user-id", type=int, default=None, help="Force a specific demo user ID (becomes the first persona)."
+        "--demo-user-id",
+        type=int,
+        default=None,
+        help="Force a specific demo user ID (becomes the first persona).",
     )
     parser.add_argument(
         "--demo-persona-count",
@@ -119,8 +122,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-replay-events",
         type=int,
-        default=200,
-        help="Maximum replay events written for the demo user.",
+        default=600,
+        help="Approximate maximum replay events retained per demo persona.",
     )
     parser.add_argument(
         "--search-window-seconds",
@@ -371,7 +374,9 @@ def _topic_category(topic_id: int, topic_labels: Dict[int, dict]) -> str:
     return "General"
 
 
-def _make_question_title(topic_ids: list[int], question_id: int, topic_labels: Dict[int, dict]) -> str:
+def _make_question_title(
+    topic_ids: list[int], question_id: int, topic_labels: Dict[int, dict]
+) -> str:
     if not topic_ids or not topic_labels:
         return synthetic_name("Question", question_id)
     primary_topic = topic_ids[0]
@@ -383,7 +388,9 @@ def _make_question_title(topic_ids: list[int], question_id: int, topic_labels: D
     return template.format(display_name=display_name, topic_name=display_name)
 
 
-def _make_answer_summary(topic_ids: list[int], answer_id: int, topic_labels: Dict[int, dict]) -> str:
+def _make_answer_summary(
+    topic_ids: list[int], answer_id: int, topic_labels: Dict[int, dict]
+) -> str:
     if not topic_ids or not topic_labels:
         return f"Synthetic answer summary for answer {answer_id}."
     primary_topic = topic_ids[0]
@@ -473,7 +480,9 @@ def load_users(path: Path) -> Dict[int, dict]:
     return users
 
 
-def load_questions(path: Path, topics: Dict[int, dict], topic_labels: Dict[int, dict] | None = None) -> Tuple[Dict[int, dict], List[dict]]:
+def load_questions(
+    path: Path, topics: Dict[int, dict], topic_labels: Dict[int, dict] | None = None
+) -> Tuple[Dict[int, dict], List[dict]]:
     if topic_labels is None:
         topic_labels = {}
     questions: Dict[int, dict] = {}
@@ -510,7 +519,9 @@ def load_questions(path: Path, topics: Dict[int, dict], topic_labels: Dict[int, 
     return questions, question_topic_rows
 
 
-def load_answers(path: Path, topics: Dict[int, dict], topic_labels: Dict[int, dict] | None = None) -> Tuple[Dict[int, dict], List[dict]]:
+def load_answers(
+    path: Path, topics: Dict[int, dict], topic_labels: Dict[int, dict] | None = None
+) -> Tuple[Dict[int, dict], List[dict]]:
     if topic_labels is None:
         topic_labels = {}
     answers: Dict[int, dict] = {}
@@ -562,17 +573,25 @@ def load_answers(path: Path, topics: Dict[int, dict], topic_labels: Dict[int, di
 
 def collect_impressions(
     path: Path,
-) -> Tuple[Counter, Counter, DefaultDict[int, List[Tuple[int, int]]]]:
+) -> Tuple[
+    Counter,
+    Counter,
+    DefaultDict[int, List[Tuple[int, int]]],
+    DefaultDict[int, List[Tuple[int, int, int]]],
+]:
     answer_impressions: Counter = Counter()
     answer_clicks: Counter = Counter()
     user_clicks: DefaultDict[int, List[Tuple[int, int]]] = defaultdict(list)
+    user_impressions: DefaultDict[int, List[Tuple[int, int, int]]] = defaultdict(list)
     for row in iter_rows(path):
         if not row:
             continue
         user_id = int(row[0])
         answer_id = int(row[1])
+        impression_ts = as_int(row[2])
         click_ts = as_int(row[3])
         answer_impressions[answer_id] += 1
+        user_impressions[user_id].append((impression_ts, answer_id, click_ts))
         if click_ts > 0:
             answer_clicks[answer_id] += 1
             user_clicks[user_id].append((click_ts, answer_id))
@@ -582,7 +601,7 @@ def collect_impressions(
             sum(answer_clicks.values()),
         )
     )
-    return answer_impressions, answer_clicks, user_clicks
+    return answer_impressions, answer_clicks, user_clicks, user_impressions
 
 
 def collect_queries(
@@ -708,8 +727,8 @@ def choose_demo_personas(
             if uid in selected:
                 continue
             topic_set = _quick_user_topic_set(uid, user_clicks, answers)
-            worst_overlap = (
-                max((len(topic_set & existing) for existing in selected_topic_sets), default=0)
+            worst_overlap = max(
+                (len(topic_set & existing) for existing in selected_topic_sets), default=0
             )
             if worst_overlap <= max_overlap:
                 selected.append(uid)
@@ -883,6 +902,7 @@ def choose_selected_answers(
     max_answers: int,
     ranked_answer_ids: Sequence[int],
     demo_clicks: Sequence[Tuple[int, int]],
+    demo_impressions: Sequence[Tuple[int, int, int]],
 ) -> List[int]:
     selected: List[int] = []
     seen: set[int] = set()
@@ -890,12 +910,18 @@ def choose_selected_answers(
         if answer_id not in seen:
             selected.append(answer_id)
             seen.add(answer_id)
-    for answer_id in ranked_answer_ids:
+    for _, answer_id, _ in sorted(demo_impressions, reverse=True):
+        if len(selected) >= max_answers:
+            break
         if answer_id not in seen:
             selected.append(answer_id)
             seen.add(answer_id)
+    for answer_id in ranked_answer_ids:
         if len(selected) >= max_answers:
             break
+        if answer_id not in seen:
+            selected.append(answer_id)
+            seen.add(answer_id)
     print(f"[derive] selected_answers={len(selected)}")
     return selected
 
@@ -922,53 +948,75 @@ def build_default_profile_seed(global_topics: Counter, limit: int) -> dict:
 def build_demo_event_replay(
     demo_user_id: int,
     query_rows: Sequence[Tuple[int, str, List[int]]],
-    click_rows: Sequence[Tuple[int, int]],
+    impression_rows: Sequence[Tuple[int, int, int]],
     search_window_seconds: int,
     max_replay_events: int,
 ) -> List[dict]:
     queries = sorted(query_rows, key=lambda item: item[0])
-    clicks = sorted(click_rows, key=lambda item: item[0])
+    impressions = sorted(impression_rows, key=lambda item: (item[0], item[1], item[2]))
     replay: List[dict] = []
 
-    for query_ts, query_key, query_tokens in queries:
+    for query_index, (query_ts, query_key, query_tokens) in enumerate(queries):
         replay.append(
             {
+                "event_id": f"raw-search-{demo_user_id}-{query_ts}-{query_index}",
                 "user_id": demo_user_id,
                 "event_type": "search_query",
                 "event_ts": query_ts,
                 "query_key": query_key,
                 "query_tokens": query_tokens,
+                "request_id": f"raw-search-{demo_user_id}-{query_ts}-{query_index}",
+                "surface": "search",
                 "source_confidence": "confirmed",
             }
         )
 
-    query_index = 0
-    for click_ts, answer_id in clicks:
-        while query_index + 1 < len(queries) and queries[query_index + 1][0] <= click_ts:
-            query_index += 1
-
-        matched_query = None
-        if queries:
-            candidate = queries[query_index]
-            if candidate[0] <= click_ts and click_ts - candidate[0] <= search_window_seconds:
-                matched_query = candidate
-
+    for impression_index, (impression_ts, answer_id, click_ts) in enumerate(impressions):
+        request_id = f"raw-feed-{demo_user_id}-{impression_ts}"
         replay.append(
             {
+                "event_id": (
+                    f"raw-impression-{demo_user_id}-{impression_ts}-{impression_index}-{answer_id}"
+                ),
+                "user_id": demo_user_id,
+                "event_type": "feed_impression",
+                "event_ts": impression_ts,
+                "answer_id": answer_id,
+                "request_id": request_id,
+                "surface": "feed",
+                "source_confidence": "confirmed",
+            }
+        )
+        if click_ts <= 0:
+            continue
+
+        matched_query = next(
+            (
+                query
+                for query in reversed(queries)
+                if query[0] <= click_ts and click_ts - query[0] <= search_window_seconds
+            ),
+            None,
+        )
+        replay.append(
+            {
+                "event_id": (f"raw-click-{demo_user_id}-{click_ts}-{impression_index}-{answer_id}"),
                 "user_id": demo_user_id,
                 "event_type": "search_result_click" if matched_query else "recommendation_click",
                 "event_ts": click_ts,
                 "answer_id": answer_id,
                 "matched_query_key": matched_query[1] if matched_query else None,
+                "request_id": request_id,
+                "surface": "search" if matched_query else "feed",
                 "source_confidence": "heuristic",
             }
         )
 
-    replay.sort(
-        key=lambda item: (item["event_ts"], 0 if item["event_type"] == "search_query" else 1)
-    )
+    event_priority = {"search_query": 0, "feed_impression": 1}
+    replay.sort(key=lambda item: (item["event_ts"], event_priority.get(item["event_type"], 2)))
     if max_replay_events > 0 and len(replay) > max_replay_events:
-        replay = replay[-max_replay_events:]
+        cutoff_ts = replay[-max_replay_events]["event_ts"]
+        replay = [event for event in replay if event["event_ts"] >= cutoff_ts]
     print(f"[derive] replay_events={len(replay)}")
     return replay
 
@@ -986,7 +1034,10 @@ def build_demo_user_profile_seed(
         "recommendation_click": 3.0,
         "search_result_click": 5.0,
     }
-    behavior_score = round(sum(behavior_weights[event["event_type"]] for event in replay_events), 3)
+    behavior_score = round(
+        sum(behavior_weights.get(event["event_type"], 0.0) for event in replay_events),
+        3,
+    )
     recent_clicked_answers = [
         {"answer_id": answer_id, "click_ts": click_ts}
         for click_ts, answer_id in sorted(demo_clicks, reverse=True)[: args.max_recent_clicks]
@@ -1007,6 +1058,116 @@ def build_demo_user_profile_seed(
         "behavior_score": behavior_score,
         "notes": "Bootstrapped from ZhihuRec clicks and queries for the selected demo user.",
     }
+
+
+def build_evaluation_profile_seed(
+    args: argparse.Namespace,
+    demo_user: dict,
+    impression_rows: Sequence[Tuple[int, int, int]],
+    query_rows: Sequence[Tuple[int, str, List[int]]],
+    answers: Dict[int, dict],
+    replay_events: Sequence[dict],
+) -> dict:
+    replay_start_ts = min(int(event["event_ts"]) for event in replay_events)
+    prior_clicks = sorted(
+        [
+            (click_ts, answer_id)
+            for _, answer_id, click_ts in impression_rows
+            if 0 < click_ts < replay_start_ts
+        ],
+        reverse=True,
+    )
+    prior_queries = sorted(
+        [query for query in query_rows if query[0] < replay_start_ts],
+        reverse=True,
+    )
+    topic_counter: Counter = Counter()
+    for _, answer_id in prior_clicks:
+        for topic_id in answers.get(answer_id, {}).get("topic_ids", []):
+            topic_counter[int(topic_id)] += 1
+    return {
+        "user_id": demo_user["user_id"],
+        "display_name": demo_user["display_name"],
+        "cold_start_seed_key": "evaluation_empty",
+        "topic_weights": top_weighted_topics(topic_counter, args.max_topic_weights),
+        "recent_clicked_answers": [
+            {"answer_id": answer_id, "click_ts": click_ts}
+            for click_ts, answer_id in prior_clicks[: args.max_recent_clicks]
+        ],
+        "recent_queries": [
+            {
+                "query_key": query_key,
+                "query_ts": query_ts,
+                "query_tokens": query_tokens,
+            }
+            for query_ts, query_key, query_tokens in prior_queries[: args.max_recent_queries]
+        ],
+        "behavior_score": round(len(prior_queries) + 3.0 * len(prior_clicks), 3),
+        "evaluation_start_ts": replay_start_ts,
+        "notes": "Evaluation initial state derived only from behavior before the replay window.",
+    }
+
+
+def build_sponsored_seed(
+    persona_profile_seeds: Sequence[dict],
+    answer_rows: Sequence[dict],
+) -> Tuple[List[dict], List[dict], List[dict]]:
+    preferred_topics: List[int] = []
+    for seed in persona_profile_seeds:
+        for topic in seed.get("topic_weights", []):
+            topic_id = int(topic["topic_id"])
+            if topic_id not in preferred_topics:
+                preferred_topics.append(topic_id)
+
+    campaigns: List[dict] = []
+    campaign_topics: List[dict] = []
+    creatives: List[dict] = []
+    used_answers: set[int] = set()
+    for slot, topic_id in enumerate(preferred_topics, start=1):
+        candidates = [
+            row
+            for row in answer_rows
+            if topic_id in {int(value) for value in row.get("topic_ids", [])}
+            and int(row["answer_id"]) not in used_answers
+        ]
+        if not candidates:
+            continue
+        answer = max(
+            candidates,
+            key=lambda row: (float(row.get("hot_score") or 0.0), -int(row["answer_id"])),
+        )
+        campaign_id = 9000 + slot
+        creative_id = 19000 + slot
+        answer_id = int(answer["answer_id"])
+        campaigns.append(
+            {
+                "campaign_id": campaign_id,
+                "campaign_name": f"Demo Topic {topic_id} Campaign",
+                "status": "active",
+                "start_ts": 0,
+                "end_ts": 4102444800,
+                "daily_budget_micros": 500000,
+                "pacing_mode": "even",
+                "frequency_cap_per_user_per_day": 2,
+            }
+        )
+        campaign_topics.append({"campaign_id": campaign_id, "topic_id": topic_id})
+        creatives.append(
+            {
+                "creative_id": creative_id,
+                "campaign_id": campaign_id,
+                "answer_id": answer_id,
+                "status": "active",
+                "bid_micros": 4000 + slot * 500,
+                "predicted_ctr": round(0.04 + slot * 0.005, 6),
+                "quality_score": round(0.9 - slot * 0.03, 6),
+            }
+        )
+        used_answers.add(answer_id)
+        if len(campaigns) >= 4:
+            break
+    print(f"[derive] sponsored_campaigns={len(campaigns)}")
+    return campaigns, campaign_topics, creatives
 
 
 def write_json(path: Path, payload: object) -> None:
@@ -1042,9 +1203,13 @@ def main() -> None:
     topics = load_topics(args.data_dir / "info_topic.csv", topic_labels)
     authors = load_authors(args.data_dir / "info_author.csv")
     users = load_users(args.data_dir / "info_user.csv")
-    questions, question_topic_rows = load_questions(args.data_dir / "info_question.csv", topics, topic_labels)
-    answers, answer_topic_rows = load_answers(args.data_dir / "info_answer.csv", topics, topic_labels)
-    answer_impressions, answer_clicks, user_clicks = collect_impressions(
+    questions, question_topic_rows = load_questions(
+        args.data_dir / "info_question.csv", topics, topic_labels
+    )
+    answers, answer_topic_rows = load_answers(
+        args.data_dir / "info_answer.csv", topics, topic_labels
+    )
+    answer_impressions, answer_clicks, user_clicks, user_impressions = collect_impressions(
         args.data_dir / "inter_impression.csv"
     )
     queries_by_user, query_freq = collect_queries(args.data_dir / "inter_query.csv")
@@ -1064,16 +1229,23 @@ def main() -> None:
         users[persona_id]["display_name"] = _persona_display_name(slot, persona_id)
 
     user_topics, global_topics = build_user_topic_counters(users, answers, user_clicks)
-    query_topic_rows = build_query_topic_rows(args, users, user_topics, queries_by_user, query_freq, query_labels)
+    query_topic_rows = build_query_topic_rows(
+        args, users, user_topics, queries_by_user, query_freq, query_labels
+    )
     ranked_answer_ids = rank_answers_by_hotness(answer_impressions, answer_clicks)
     hot_snapshot = build_hot_snapshot(
         ranked_answer_ids, answer_impressions, answer_clicks, args.max_hot_answers
     )
     combined_persona_clicks: List[Tuple[int, int]] = []
+    combined_persona_impressions: List[Tuple[int, int, int]] = []
     for persona_id in demo_user_ids:
         combined_persona_clicks.extend(user_clicks.get(persona_id, []))
+        combined_persona_impressions.extend(user_impressions.get(persona_id, []))
     selected_answer_ids = choose_selected_answers(
-        args.max_answers, ranked_answer_ids, combined_persona_clicks
+        args.max_answers,
+        ranked_answer_ids,
+        combined_persona_clicks,
+        combined_persona_impressions,
     )
     selected_answer_set = set(selected_answer_ids)
 
@@ -1140,13 +1312,14 @@ def main() -> None:
 
     persona_replay_events: List[List[dict]] = []
     persona_profile_seeds: List[dict] = []
+    evaluation_profile_seeds: List[dict] = []
     for persona_id in demo_user_ids:
         persona_queries = queries_by_user.get(persona_id, [])
         persona_clicks = user_clicks.get(persona_id, [])
         persona_replay = build_demo_event_replay(
             demo_user_id=persona_id,
             query_rows=persona_queries,
-            click_rows=persona_clicks,
+            impression_rows=user_impressions.get(persona_id, []),
             search_window_seconds=args.search_window_seconds,
             max_replay_events=args.max_replay_events,
         )
@@ -1161,6 +1334,16 @@ def main() -> None:
                 replay_events=persona_replay,
             )
         )
+        evaluation_profile_seeds.append(
+            build_evaluation_profile_seed(
+                args=args,
+                demo_user=users[persona_id],
+                impression_rows=user_impressions.get(persona_id, []),
+                query_rows=persona_queries,
+                answers=answers,
+                replay_events=persona_replay,
+            )
+        )
 
     replay_events: List[dict] = []
     for persona_replay in persona_replay_events:
@@ -1171,6 +1354,17 @@ def main() -> None:
 
     demo_user_profile_seed = persona_profile_seeds[0]
     default_profile_seed = build_default_profile_seed(global_topics, args.max_topic_weights)
+    evaluation_default_profile_seed = {
+        "seed_key": "evaluation_empty",
+        "topic_weights": [],
+        "recent_clicked_answers": [],
+        "recent_queries": [],
+        "behavior_score": 0.0,
+        "notes": "Empty time-correct default used only by offline evaluation.",
+    }
+    sponsored_campaigns, sponsored_campaign_topics, sponsored_creatives = build_sponsored_seed(
+        persona_profile_seeds, answer_rows
+    )
 
     persona_summary = [
         {
@@ -1207,11 +1401,28 @@ def main() -> None:
         "demo_event_replay.jsonl": write_jsonl(
             args.output_dir / "demo_event_replay.jsonl", replay_events
         ),
+        "sponsored_campaign.jsonl": write_jsonl(
+            args.output_dir / "sponsored_campaign.jsonl", sponsored_campaigns
+        ),
+        "sponsored_campaign_topic.jsonl": write_jsonl(
+            args.output_dir / "sponsored_campaign_topic.jsonl", sponsored_campaign_topics
+        ),
+        "sponsored_creative.jsonl": write_jsonl(
+            args.output_dir / "sponsored_creative.jsonl", sponsored_creatives
+        ),
     }
 
     write_json(args.output_dir / "default_profile_seed.json", default_profile_seed)
+    write_json(
+        args.output_dir / "evaluation_default_profile_seed.json",
+        evaluation_default_profile_seed,
+    )
     write_json(args.output_dir / "demo_user_profile_seed.json", demo_user_profile_seed)
     write_json(args.output_dir / "demo_persona_profile_seeds.json", persona_profile_seeds)
+    write_json(
+        args.output_dir / "evaluation_persona_profile_seeds.json",
+        evaluation_profile_seeds,
+    )
     write_json(args.output_dir / "demo_personas.json", persona_summary)
 
     manifest = {
@@ -1228,17 +1439,20 @@ def main() -> None:
         "query_topic_row_count": len(query_topic_rows),
         "hot_snapshot_count": len(hot_snapshot),
         "replay_event_count": len(replay_events),
+        "sponsored_campaign_count": len(sponsored_campaigns),
+        "sponsored_creative_count": len(sponsored_creatives),
         "files_written": files_written,
         "heuristics": {
             "hot_score_formula": "click_count * 10 + impression_count",
             "query_topic_source": "user-level co-occurrence between query keys and clicked-answer topics",
             "search_click_derivation": "Clicks within search_window_seconds after the latest query are tagged as search_result_click heuristically",
             "display_text_policy": "display_title, display_summary, display_name, and display_query are synthetic because raw Zhihu text is not available in ZhihuRec",
+            "sponsored_policy": "Synthetic campaigns target persona topics; expected spend is bid_micros * predicted_ctr per served impression.",
         },
         "future_work": [
             "Replace synthetic display fields with stronger demo copy generation if needed",
-            "Build vector assets and ANN indexes behind answer.vector_key",
-            "Import these artifacts into MySQL tables defined in sql/v1_schema.sql",
+            "Expand beyond the three local personas before making cross-user claims",
+            "Run larger exposure-aware retrieval and ranking experiments",
         ],
     }
     write_json(args.output_dir / "manifest.json", manifest)

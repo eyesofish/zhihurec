@@ -6,6 +6,7 @@ from .common import ApiModel, TopicCard
 
 
 class SearchRequest(ApiModel):
+    event_id: str | None = None
     user_id: int
     query_key: str | None = None
     query_text: str | None = None
@@ -68,6 +69,7 @@ class SearchDebugPayload(ApiModel):
 
 class SearchResponse(ApiModel):
     user_id: int
+    request_id: str
     query_key: str
     items: list[SearchItem]
     debug: SearchDebugPayload | None = None

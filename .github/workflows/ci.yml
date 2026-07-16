@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: python -m pip install -r backend/requirements-dev.txt
+      - run: python -m pip check
+      - run: python -m ruff check backend scripts tests
+      - run: >-
+          python -m ruff format --check backend scripts tests
+          --exclude scripts/demo_content/cluster_topics.py
+          --exclude scripts/demo_content/generate_labels.py
+          --exclude scripts/demo_content/templates.py
+          --exclude tests/test_answer_card_route.py
+          --exclude tests/test_search_route.py
+      - run: python -m mypy
+      - run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: product-frontend/package-lock.json
+      - working-directory: product-frontend
+        run: npm ci
+      - working-directory: product-frontend
+        run: npm test -- --run
+      - working-directory: product-frontend
+        run: npm run build
+
+  mysql-integration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: zhihurec_demo
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      ZHIHUREC_DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo
+      ZHIHUREC_EVENT_MODE: sync_mysql
+      ZHIHUREC_SPONSORED_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: python -m pip install -r backend/requirements-dev.txt
+      - run: python scripts/apply_demo_mysql.py
+      - run: python -m pytest -q -m "mysql and not kafka"
+
+  kafka-integration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: zhihurec_demo
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      ZHIHUREC_DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo
+      ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS: 127.0.0.1:9092
+      ZHIHUREC_EVENT_MODE: kafka_async
+      ZHIHUREC_SPONSORED_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: python -m pip install -r backend/requirements-dev.txt
+      - run: docker compose -f docker-compose.kafka.yml up -d --wait --wait-timeout 120 kafka
+      - run: docker compose -f docker-compose.kafka.yml run --rm kafka-init
+      - run: python scripts/apply_demo_mysql.py
+      - run: python -m pytest -q -m kafka
+      - if: failure()
+        run: docker compose -f docker-compose.kafka.yml logs --no-color
+      - if: always()
+        run: docker compose -f docker-compose.kafka.yml down -v

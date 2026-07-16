@@ -946,7 +946,7 @@ V1 不直接把完整 raw 数据暴露给前端，而是围绕 demo user **{demo
 
 3. **Feed→Search hook 有行为基础**：**{pct(query["feed_before_search_10m_share"])}** 的 query 在同用户前 10 分钟内有 feed 曝光，**{pct(query["post_search_click_4h_share"])}** 的 query 后 4 小时内可观察到启发式点击。它不能证明 causal lift，但足够支持 brief §1 的工程叙事：search 是高意图信号，应该进入后续推荐画像。
 
-4. **指标闭环已经对上工程实现**：`docs/v1_metrics.md` 的 Search Carryover Gain@10 把这个故事落到可复现数字：当前 replay baseline 0.9000、replay 1.0000、Gain@10 = +0.1000。C1 的数据分析解释“为什么这个信号值得建”，metrics 文档解释“建完后是否真的传导到 feed”。
+4. **指标闭环已经对上工程实现**：`docs/v1_metrics.md` 的无泄漏三 persona、逐用户 replay 当前得到加权 baseline 0.4167、replay 0.3967、Search Carryover Gain@10 = -0.0200。用户 7248 为正、另外两位 persona 为负，说明“search 是值得研究的状态信号”仍成立，但当前 intervention 不稳定。
 
 ## 7. 复现指南
 
