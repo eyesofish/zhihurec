@@ -26,6 +26,12 @@ DEFAULT_ARMS = [
     "lgb_plus_als",
     "lgb_plus_als_plus_search",
 ]
+PREREGISTERED_SEARCH_ARMS = [
+    "lgb_plus_als_plus_search_decay_30m",
+    "lgb_plus_als_plus_search_decay_4h",
+    "lgb_plus_als_plus_search_gated_30m_4h",
+    "lgb_plus_als_plus_search_gated_2h_12h",
+]
 
 
 def post_json(url: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -83,7 +89,8 @@ def post_event(base_url: str, event: dict[str, Any]) -> str | None:
                 "query_key": query_key,
                 "query_text": f"Query {query_key}",
                 "page_size": 10,
-                "debug": False,
+                "debug": True,
+                "replay_event_ts": int(event["event_ts"]),
             },
         )
         return "search_query"
@@ -96,7 +103,8 @@ def post_event(base_url: str, event: dict[str, Any]) -> str | None:
             or ("search" if event_type == "search_result_click" else "feed"),
             "answer_id": int(event["answer_id"]),
             "request_id": request_id,
-            "debug": False,
+            "debug": True,
+            "replay_event_ts": int(event["event_ts"]),
         }
         if event_type == "search_result_click":
             query_key = event.get("matched_query_key") or event.get("query_key")
@@ -151,7 +159,66 @@ def request_boundaries(
     return train_requests, test_requests, test_start_ts
 
 
-def relevant_by_request(events: list[dict[str, Any]]) -> dict[str, set[int]]:
+def request_partitions(
+    events: list[dict[str, Any]],
+    *,
+    train_ratio: float,
+    validation_ratio: float,
+) -> tuple[set[str], set[str], set[str], int | None, int]:
+    if not 0 < train_ratio < 1:
+        raise ValueError("train_ratio must be between 0 and 1")
+    if validation_ratio < 0 or train_ratio + validation_ratio >= 1:
+        raise ValueError("train_ratio + validation_ratio must be less than 1")
+
+    request_ts: dict[str, int] = {}
+    for event in events:
+        if event.get("event_type") != "feed_impression" or not event.get("request_id"):
+            continue
+        request_id = str(event["request_id"])
+        request_ts[request_id] = min(
+            request_ts.get(request_id, int(event["event_ts"])),
+            int(event["event_ts"]),
+        )
+    ordered = sorted(request_ts, key=lambda request_id: (request_ts[request_id], request_id))
+    minimum_requests = 3 if validation_ratio > 0 else 2
+    if len(ordered) < minimum_requests:
+        raise RuntimeError(
+            f"evaluation requires at least {minimum_requests} item-level feed requests per user"
+        )
+
+    max_train_requests = len(ordered) - (2 if validation_ratio > 0 else 1)
+    train_cutoff = max(1, min(round(len(ordered) * train_ratio), max_train_requests))
+    if validation_ratio > 0:
+        validation_cutoff = max(
+            train_cutoff + 1,
+            min(round(len(ordered) * (train_ratio + validation_ratio)), len(ordered) - 1),
+        )
+    else:
+        validation_cutoff = train_cutoff
+
+    train_requests = set(ordered[:train_cutoff])
+    validation_requests = set(ordered[train_cutoff:validation_cutoff])
+    test_requests = set(ordered[validation_cutoff:])
+    validation_start_ts = (
+        min(request_ts[request_id] for request_id in validation_requests)
+        if validation_requests
+        else None
+    )
+    test_start_ts = min(request_ts[request_id] for request_id in test_requests)
+    return (
+        train_requests,
+        validation_requests,
+        test_requests,
+        validation_start_ts,
+        test_start_ts,
+    )
+
+
+def relevant_by_request(
+    events: list[dict[str, Any]],
+    *,
+    before_ts: int | None = None,
+) -> dict[str, set[int]]:
     result: dict[str, set[int]] = defaultdict(set)
     for event in events:
         if event.get("event_type") not in {
@@ -159,6 +226,8 @@ def relevant_by_request(events: list[dict[str, Any]]) -> dict[str, set[int]]:
             "search_result_click",
             "upvote",
         }:
+            continue
+        if before_ts is not None and int(event.get("event_ts", 0)) >= before_ts:
             continue
         if not event.get("request_id") or event.get("answer_id") is None:
             continue
@@ -175,10 +244,24 @@ def evaluate_user_arm(
     k: int,
     candidate_k: int,
     train_ratio: float,
+    validation_ratio: float,
+    split: str,
     evaluation_seeds: Path,
 ) -> dict[str, Any]:
-    _, test_requests, test_start_ts = request_boundaries(events, train_ratio)
-    relevant = relevant_by_request(events)
+    _, validation_requests, test_requests, _, test_start_ts = request_partitions(
+        events,
+        train_ratio=train_ratio,
+        validation_ratio=validation_ratio,
+    )
+    if split == "validation":
+        if not validation_requests:
+            raise ValueError("validation split requires validation_ratio > 0")
+        target_requests = validation_requests
+        evaluation_end_ts = test_start_ts
+    else:
+        target_requests = test_requests
+        evaluation_end_ts = None
+    relevant = relevant_by_request(events, before_ts=evaluation_end_ts)
     reset_demo_user(user_id, evaluation_seeds)
 
     posted: dict[str, int] = defaultdict(int)
@@ -191,10 +274,12 @@ def evaluate_user_arm(
 
     for event in sorted(events, key=lambda row: int(row.get("event_ts", 0))):
         event_ts = int(event.get("event_ts", 0))
+        if evaluation_end_ts is not None and event_ts >= evaluation_end_ts:
+            break
         request_id = str(event.get("request_id") or "")
         if (
             event.get("event_type") == "feed_impression"
-            and request_id in test_requests
+            and request_id in target_requests
             and request_id not in scored_requests
             and request_id in relevant
         ):
@@ -226,23 +311,23 @@ def evaluate_user_arm(
             )
             scored_requests.add(request_id)
 
-        if event_ts >= test_start_ts or event.get("event_type") != "feed_impression":
-            try:
-                kind = post_event(base_url, event)
-                if kind:
-                    posted[kind] += 1
-            except (HTTPError, URLError, KeyError, ValueError) as exc:
-                failures += 1
-                print(
-                    f"user={user_id} arm={arm} event={event.get('event_type')} "
-                    f"ts={event_ts} failed: {exc}",
-                    file=sys.stderr,
-                )
+        try:
+            kind = post_event(base_url, event)
+            if kind:
+                posted[kind] += 1
+        except (HTTPError, URLError, KeyError, ValueError) as exc:
+            failures += 1
+            print(
+                f"user={user_id} arm={arm} event={event.get('event_type')} "
+                f"ts={event_ts} failed: {exc}",
+                file=sys.stderr,
+            )
 
     relevant_count = sum(len(relevant[request_id]) for request_id in scored_requests)
     return {
         "user_id": user_id,
         "arm": arm,
+        "split": split,
         "k": k,
         "candidate_k": candidate_k,
         "requests_scored": len(scored_requests),
@@ -286,6 +371,99 @@ def aggregate(results: list[dict[str, Any]], arm: str) -> dict[str, Any]:
         ),
         "request_failures": sum(int(row["request_failures"]) for row in rows),
     }
+
+
+def compare_search_arms(
+    results: list[dict[str, Any]],
+    aggregates: list[dict[str, Any]],
+    *,
+    baseline_arm: str = "lgb_plus_als",
+) -> list[dict[str, Any]]:
+    aggregate_by_arm = {str(row["arm"]): row for row in aggregates}
+    baseline = aggregate_by_arm.get(baseline_arm)
+    if baseline is None:
+        return []
+    baseline_users = {
+        int(row["user_id"]): row for row in results if row["arm"] == baseline_arm
+    }
+    comparisons: list[dict[str, Any]] = []
+    for arm, aggregate_row in aggregate_by_arm.items():
+        if arm == baseline_arm or "search" not in arm:
+            continue
+        stable_users = 0
+        compared_users = 0
+        for row in results:
+            if row["arm"] != arm:
+                continue
+            baseline_user = baseline_users.get(int(row["user_id"]))
+            if baseline_user is None:
+                continue
+            compared_users += 1
+            if (
+                float(row["recall_at_k"]) >= float(baseline_user["recall_at_k"])
+                and float(row["ndcg_at_k"]) >= float(baseline_user["ndcg_at_k"])
+            ):
+                stable_users += 1
+        comparisons.append(
+            {
+                "arm": arm,
+                "recall_delta": round(
+                    float(aggregate_row["weighted_recall_at_k"])
+                    - float(baseline["weighted_recall_at_k"]),
+                    6,
+                ),
+                "ndcg_delta": round(
+                    float(aggregate_row["weighted_ndcg_at_k"])
+                    - float(baseline["weighted_ndcg_at_k"]),
+                    6,
+                ),
+                "stable_users": stable_users,
+                "users_compared": compared_users,
+                "passes_persona_stability": (
+                    compared_users > 0 and stable_users * 3 >= compared_users * 2
+                ),
+                "meets_success_gate": (
+                    float(aggregate_row["weighted_recall_at_k"])
+                    > float(baseline["weighted_recall_at_k"])
+                    and float(aggregate_row["weighted_ndcg_at_k"])
+                    > float(baseline["weighted_ndcg_at_k"])
+                    and compared_users > 0
+                    and stable_users * 3 >= compared_users * 2
+                ),
+            }
+        )
+    return comparisons
+
+
+def select_validation_arm(
+    comparisons: list[dict[str, Any]],
+    aggregates: list[dict[str, Any]],
+) -> str | None:
+    aggregate_by_arm = {str(row["arm"]): row for row in aggregates}
+    baseline = aggregate_by_arm.get("lgb_plus_als")
+    if baseline is None:
+        return None
+    eligible = [
+        row
+        for row in comparisons
+        if row["passes_persona_stability"] and row["arm"] in PREREGISTERED_SEARCH_ARMS
+        and (
+            float(aggregate_by_arm[row["arm"]]["weighted_recall_at_k"])
+            > float(baseline["weighted_recall_at_k"])
+            or float(aggregate_by_arm[row["arm"]]["weighted_ndcg_at_k"])
+            > float(baseline["weighted_ndcg_at_k"])
+        )
+    ]
+    if not eligible:
+        return None
+    selected = max(
+        eligible,
+        key=lambda row: (
+            float(aggregate_by_arm[row["arm"]]["weighted_recall_at_k"]),
+            float(aggregate_by_arm[row["arm"]]["weighted_ndcg_at_k"]),
+        ),
+    )
+    return str(selected["arm"])
 
 
 def assert_sync_backend(base_url: str) -> None:
@@ -341,6 +519,8 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--candidate-k", type=int, default=50)
     parser.add_argument("--train-ratio", type=float, default=0.8)
+    parser.add_argument("--validation-ratio", type=float, default=0.0)
+    parser.add_argument("--split", choices=("validation", "test"), default="test")
     parser.add_argument("--replay", type=Path, default=DEFAULT_REPLAY)
     parser.add_argument("--user-id", type=int, action="append", dest="user_ids")
     parser.add_argument("--arm", action="append", dest="arms")
@@ -358,14 +538,23 @@ def main() -> None:
     for event in events:
         events_by_user[int(event["user_id"])].append(event)
     user_ids = args.user_ids or sorted(events_by_user)
-    arms = args.arms or DEFAULT_ARMS
+    arms = args.arms or (
+        ["lgb_plus_als", *PREREGISTERED_SEARCH_ARMS]
+        if args.split == "validation"
+        else DEFAULT_ARMS
+    )
     evaluation_seeds = (
         args.evaluation_seeds or args.replay.parent / "evaluation_persona_profile_seeds.json"
     )
     if not evaluation_seeds.exists():
         raise SystemExit(f"evaluation seeds not found: {evaluation_seeds}")
     assert_sync_backend(args.base_url)
-    validate_artifact_partition(args.model_dir, args.train_ratio, arms)
+    artifact_train_ratio = (
+        args.train_ratio
+        if args.split == "validation"
+        else args.train_ratio + args.validation_ratio
+    )
+    validate_artifact_partition(args.model_dir, artifact_train_ratio, arms)
     validate_loaded_artifacts(
         args.base_url,
         args.model_dir,
@@ -382,19 +571,32 @@ def main() -> None:
             k=args.k,
             candidate_k=args.candidate_k,
             train_ratio=args.train_ratio,
+            validation_ratio=args.validation_ratio,
+            split=args.split,
             evaluation_seeds=evaluation_seeds,
         )
         for arm in arms
         for user_id in user_ids
     ]
+    aggregates = [aggregate(results, arm) for arm in arms]
+    comparisons = compare_search_arms(results, aggregates)
     output = {
         "protocol": "per-user chronological per-request organic evaluation",
         "train_ratio": args.train_ratio,
+        "validation_ratio": args.validation_ratio,
+        "split": args.split,
+        "artifact_train_ratio": artifact_train_ratio,
         "users": user_ids,
         "arms": arms,
         "evaluation_seeds": str(evaluation_seeds),
         "per_user": results,
-        "aggregate": [aggregate(results, arm) for arm in arms],
+        "aggregate": aggregates,
+        "search_comparisons": comparisons,
+        "selected_search_arm": (
+            select_validation_arm(comparisons, aggregates)
+            if args.split == "validation"
+            else None
+        ),
     }
     encoded = json.dumps(output, indent=2, ensure_ascii=False)
     if args.output:

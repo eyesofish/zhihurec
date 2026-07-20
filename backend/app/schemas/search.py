@@ -12,6 +12,7 @@ class SearchRequest(ApiModel):
     query_text: str | None = None
     page_size: int = Field(10, ge=1, le=50)
     debug: bool = False
+    replay_event_ts: int | None = Field(None, ge=0)
 
     @field_validator("query_key")
     @classmethod
@@ -33,6 +34,8 @@ class SearchRequest(ApiModel):
     def require_query_key_or_text(self) -> SearchRequest:
         if not self.query_key and not self.query_text:
             raise ValueError("query_key or query_text is required")
+        if self.replay_event_ts is not None and not self.debug:
+            raise ValueError("replay_event_ts requires debug=true")
         return self
 
 

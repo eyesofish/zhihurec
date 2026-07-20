@@ -29,6 +29,7 @@ from backend.app.repositories.event_dao import (
     append_recent_query,
     apply_click_profile_update,
     claim_event_id,
+    confirm_recent_query,
     record_click_event,
     record_log_only_event,
     record_search_query,
@@ -204,6 +205,12 @@ class ProfileEventApplier:
             campaign_id=event.campaign_id,
             creative_id=event.creative_id,
             dwell_ms=event.dwell_ms,
+        )
+        confirm_recent_query(
+            connection,
+            profile_row,
+            query_key=event.query_key,
+            event_ts=event.event_ts,
         )
         if sponsored_attribution is not None:
             record_sponsored_click(

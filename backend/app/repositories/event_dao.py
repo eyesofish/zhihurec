@@ -106,7 +106,11 @@ def append_recent_query(
             "query_ts": event_ts,
             "query_tokens": query_tokens(query_key),
         },
-        *[row for row in recent_queries if isinstance(row, dict)],
+        *[
+            row
+            for row in recent_queries
+            if isinstance(row, dict) and str(row.get("query_key") or "") != query_key
+        ],
     ]
     next_recent_queries.sort(key=lambda row: int(row.get("query_ts") or 0), reverse=True)
     next_recent_queries = next_recent_queries[:5]
@@ -128,6 +132,37 @@ def append_recent_query(
                 event_ts,
                 int(profile_row["user_id"]),
             ),
+        )
+
+
+def confirm_recent_query(
+    connection: Any,
+    profile_row: dict[str, Any],
+    query_key: str,
+    event_ts: int,
+) -> None:
+    recent_queries = parse_json(profile_row.get("recent_queries_json"), [])
+    updated = False
+    for row in recent_queries:
+        if (
+            not updated
+            and isinstance(row, dict)
+            and str(row.get("query_key") or "") == query_key
+            and int(row.get("query_ts") or 0) <= event_ts
+        ):
+            row["confirmed_ts"] = event_ts
+            updated = True
+    if not updated:
+        return
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE user_profile
+            SET recent_queries_json = %s
+            WHERE user_id = %s
+            """,
+            (json_text(recent_queries), int(profile_row["user_id"])),
         )
 
 

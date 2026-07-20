@@ -33,6 +33,7 @@ from backend.app.repositories.event_dao import (
     append_recent_query,
     apply_click_profile_update,
     claim_event_id,
+    confirm_recent_query,
     record_click_event,
     record_log_only_event,
     record_search_query,
@@ -49,6 +50,7 @@ from backend.app.repositories.ranker import (
     loaded_model_metadata,
     score_candidates,
 )
+from backend.app.repositories.search_signal import search_signal_config
 from backend.app.repositories.sponsored import (
     blend_fixed_slots,
     sponsored_slot_is_reachable,
@@ -159,21 +161,42 @@ class MysqlRuntimeRepository(RuntimeRepository):
             profile_row = fetch_profile_row(connection, user_id)
             profile = profile_from_row(profile_row)
             topic_weight_map = {item.topic_id: item.weight for item in profile.topic_weights}
-            use_search = experiment_arm in {"default", "lgb_plus_als_plus_search"}
+            signal_config = search_signal_config(experiment_arm)
+            use_search = signal_config is not None
             use_lgb = experiment_arm in {
                 "default",
                 "lgb_plus_als",
                 "lgb_plus_als_plus_search",
+                "lgb_plus_als_plus_search_decay_30m",
+                "lgb_plus_als_plus_search_decay_4h",
+                "lgb_plus_als_plus_search_gated_30m_4h",
+                "lgb_plus_als_plus_search_gated_2h_12h",
             }
-            require_lgb = experiment_arm in {"lgb_plus_als", "lgb_plus_als_plus_search"}
+            require_lgb = use_lgb and experiment_arm != "default"
             use_als = (
                 self._settings.als_recall_enabled
                 if experiment_arm == "default"
                 else experiment_arm != "manual"
             )
             query_topic_scores = (
-                load_recent_query_topic_scores(connection, profile.recent_queries)
-                if use_search
+                load_recent_query_topic_scores(
+                    connection,
+                    profile.recent_queries,
+                    now_ts=as_of_ts if as_of_ts is not None else int(time.time()),
+                    config=signal_config,
+                )
+                if use_search and signal_config is not None
+                else {}
+            )
+            query_recall_topic_scores = (
+                load_recent_query_topic_scores(
+                    connection,
+                    profile.recent_queries,
+                    now_ts=as_of_ts if as_of_ts is not None else int(time.time()),
+                    config=signal_config,
+                    confirmed_only=signal_config.mode == "gated",
+                )
+                if use_search and signal_config is not None
                 else {}
             )
             default_seed_key = (
@@ -194,7 +217,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
             candidates = self._load_feed_candidates(
                 connection=connection,
                 topic_weight_map=topic_weight_map,
-                query_topic_scores=query_topic_scores,
+                query_topic_scores=query_recall_topic_scores,
                 page_size=page_size,
                 user_id=user_id,
                 use_als=use_als,
@@ -494,7 +517,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
             connection.close()
 
     def search(self, payload: SearchRequest) -> SearchResponse:
-        event_ts = int(time.time())
+        event_ts = (
+            payload.replay_event_ts
+            if payload.replay_event_ts is not None
+            else int(time.time())
+        )
         connection = self._connection_pool.connect()
         try:
             query_key = resolve_query_key(connection, payload.query_key, payload.query_text)
@@ -608,7 +635,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
             connection.close()
 
     def record_recommendation_click(self, payload: RecommendationClickRequest) -> EventAckResponse:
-        event_ts = int(time.time())
+        event_ts = (
+            payload.replay_event_ts
+            if payload.replay_event_ts is not None
+            else int(time.time())
+        )
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
             user_id=payload.user_id,
@@ -714,7 +745,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
     def record_search_result_click(self, payload: SearchResultClickRequest) -> EventAckResponse:
         query_key = normalize_query_key(payload.query_key)
-        event_ts = int(time.time())
+        event_ts = (
+            payload.replay_event_ts
+            if payload.replay_event_ts is not None
+            else int(time.time())
+        )
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
             user_id=payload.user_id,
@@ -790,6 +825,12 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 sponsored_delivery_id=event.sponsored_delivery_id,
                 campaign_id=event.campaign_id,
                 creative_id=event.creative_id,
+            )
+            confirm_recent_query(
+                connection,
+                profile_row,
+                query_key=query_key,
+                event_ts=event_ts,
             )
             if sponsored_attribution is not None:
                 record_sponsored_click(
@@ -945,6 +986,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     request_id=payload.request_id,
                     sponsored_delivery_id=payload.sponsored_delivery_id,
                     debug=payload.debug,
+                    replay_event_ts=payload.replay_event_ts,
                 )
             )
             behavior_score = (
@@ -972,6 +1014,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     request_id=payload.request_id,
                     sponsored_delivery_id=payload.sponsored_delivery_id,
                     debug=payload.debug,
+                    replay_event_ts=payload.replay_event_ts,
                 )
             )
             behavior_score = (
@@ -990,7 +1033,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 raise ValueError("upvote requires answer_id")
             # Apply the same positive profile update as a recommendation click,
             # but stamp the user_event row with event_type='upvote' for analytics distinction.
-            event_ts = int(time.time())
+            event_ts = (
+                payload.replay_event_ts
+                if payload.replay_event_ts is not None
+                else int(time.time())
+            )
             sponsored_attribution = self._load_sponsored_event_attribution(
                 delivery_id=payload.sponsored_delivery_id,
                 user_id=payload.user_id,
@@ -1097,7 +1144,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
             )
 
         # Log-only events: feed_impression, detail_view, dwell, downvote, share
-        event_ts = int(time.time())
+        event_ts = (
+            payload.replay_event_ts
+            if payload.replay_event_ts is not None
+            else int(time.time())
+        )
         if payload.answer_id is None:
             raise ValueError(f"{payload.event_type} requires answer_id")
         sponsored_attribution = self._load_sponsored_event_attribution(

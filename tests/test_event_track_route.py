@@ -130,6 +130,21 @@ def test_event_track_feed_impression_requires_answer_id(mysql_client, mysql_demo
     assert response.status_code == 422
 
 
+def test_event_track_replay_timestamp_requires_debug(unwired_client):
+    response = unwired_client.post(
+        "/event/track",
+        json={
+            "user_id": 7248,
+            "event_type": "feed_impression",
+            "surface": "feed",
+            "answer_id": 1,
+            "replay_event_ts": 100,
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_event_track_duplicate_upvote_is_idempotent(mysql_client, mysql_demo_user):
     settings = Settings()
     before = mysql_client.get("/debug/profile", params={"user_id": mysql_demo_user}).json()

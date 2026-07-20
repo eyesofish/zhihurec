@@ -8,6 +8,11 @@ from backend.app.repositories._utils import (
     parse_topic_weights,
     placeholders,
 )
+from backend.app.repositories.search_signal import (
+    SearchSignalConfig,
+    query_can_open_recall,
+    recent_query_multiplier,
+)
 from backend.app.schemas.profile import (
     DebugProfileResponse,
     ProfileRecentQuery,
@@ -89,6 +94,10 @@ def load_default_seed_topic_weights(
 def load_recent_query_topic_scores(
     connection: Any,
     recent_queries: list[ProfileRecentQuery],
+    *,
+    now_ts: int,
+    config: SearchSignalConfig,
+    confirmed_only: bool = False,
 ) -> dict[int, float]:
     query_keys = list(dict.fromkeys(item.query_key for item in recent_queries if item.query_key))
     if not query_keys:
@@ -107,8 +116,19 @@ def load_recent_query_topic_scores(
         )
         rows = cursor.fetchall()
 
-    scores: dict[int, float] = {}
+    rows_by_query: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        topic_id = int(row["topic_id"])
-        scores[topic_id] = max(scores.get(topic_id, 0.0), float(row.get("score") or 0.0))
+        rows_by_query.setdefault(str(row["query_key"]), []).append(row)
+
+    scores: dict[int, float] = {}
+    for query in recent_queries:
+        if confirmed_only and not query_can_open_recall(query, config=config):
+            continue
+        multiplier = recent_query_multiplier(query, now_ts=now_ts, config=config)
+        if multiplier <= 0:
+            continue
+        for row in rows_by_query.get(query.query_key, []):
+            topic_id = int(row["topic_id"])
+            effective_score = float(row.get("score") or 0.0) * multiplier
+            scores[topic_id] = max(scores.get(topic_id, 0.0), effective_score)
     return scores

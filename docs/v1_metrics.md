@@ -47,7 +47,12 @@ classification metric. This does not establish ranking lift.
 The artifact records feature schema version 2 and a data fingerprint. Serving refuses
 incompatible metadata instead of silently loading an old model.
 
-## Organic per-request ablation
+## Historical organic per-request ablation
+
+The following 80/20 result predates the conservative one-click-per-query replay
+construction introduced on 2026-07-20. It remains historical evidence for the earlier,
+broader search-click heuristic; it is not the validation result for the redesigned
+search signal.
 
 Protocol:
 
@@ -82,7 +87,37 @@ Interpretation:
 This negative result is intentionally retained. The resume-safe claim is that the
 project built and isolated the stages, not that ML improved recommendation quality.
 
-## Search Carryover Gain@10
+## Preregistered search-signal redesign
+
+On 2026-07-20, the replay construction was tightened before testing a redesign:
+
+- each query can receive at most one heuristic search click;
+- the click must be the nearest subsequent click inside the configured window;
+- query topics and clicked-answer topics must overlap;
+- query-topic co-occurrence uses only clicks observed before each query event;
+- the source dataset still has no real search-result exposure, so these remain
+  conservative pseudo-sessions rather than causal click attribution.
+
+Four configurations were preregistered: decay-only half-lives of 30 minutes and four
+hours, plus gated query/confirmed half-lives of 30 minutes/four hours and two
+hours/12 hours. Confirmed queries receive a 2x multiplier; unconfirmed queries may
+affect ranking but cannot open the gated recall channel.
+
+Model selection used a per-user chronological 60/20/20 request split. The middle 20%
+contained 44 attributable requests across three personas. Recall@10 and NDCG@10 were
+both zero for the LightGBM + ALS baseline and all four search arms. Candidate Recall@50
+was also tied at `0.0201`.
+
+No configuration separated from the baseline on the preregistered selection metrics,
+so no search arm was selected and the final 20% split was not rerun for this redesign.
+That split is not a pristine holdout because the earlier 80/20 experiments above had
+already used it. Machine-readable evidence is stored in
+`docs/metrics/search_signal_validation.json`.
+
+## Historical Search Carryover Gain@10
+
+This result also predates the conservative replay construction and uses the earlier
+broader heuristic.
 
 For a search with topic set \(T_s\):
 

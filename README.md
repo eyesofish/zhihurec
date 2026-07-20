@@ -8,8 +8,10 @@ and a small sponsored-candidate lane.
 
 ## Current evidence
 
-The corrected evaluation is item-impression-aware, chronological, and isolated per
-persona/request. Latest verified results are stored in `docs/metrics/latest.json`.
+The evaluation is item-impression-aware, chronological, and isolated per
+persona/request. `docs/metrics/latest.json` stores the last full 80/20 result under the
+older broad search-click heuristic; the current conservative redesign validation is in
+`docs/metrics/search_signal_validation.json`.
 
 - Aggregate Search Carryover Gain@10: `-0.0200` across 60 search events and three
   personas (`0.4167 -> 0.3967`). User 7248 improved, while users 1026 and 3343
@@ -17,6 +19,9 @@ persona/request. Latest verified results are stored in `docs/metrics/latest.json
 - Best current organic Recall@10 arm: LightGBM + cutoff-safe ALS, `0.0761`; NDCG@10
   `0.0437`.
 - Adding the current search path reduced that arm to Recall@10 `0.0326`.
+- A preregistered 60/20/20 redesign tested four decay/gating configurations. All tied
+  the validation baseline at zero Recall@10/NDCG@10 and candidate Recall@50, so no arm
+  was selected and the final 20% split was not rerun for this redesign.
 - The LightGBM pointwise prototype has finite held-out metrics (`ROC AUC 0.5942`), but
   absolute ranking quality remains low.
 

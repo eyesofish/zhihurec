@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pydantic import Field, model_validator
+
 from .common import ApiModel
 
 
@@ -10,6 +12,13 @@ class RecommendationClickRequest(ApiModel):
     request_id: str | None = None
     sponsored_delivery_id: str | None = None
     debug: bool = False
+    replay_event_ts: int | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_replay_event_ts(self) -> RecommendationClickRequest:
+        if self.replay_event_ts is not None and not self.debug:
+            raise ValueError("replay_event_ts requires debug=true")
+        return self
 
 
 class SearchResultClickRequest(ApiModel):
@@ -20,6 +29,13 @@ class SearchResultClickRequest(ApiModel):
     request_id: str | None = None
     sponsored_delivery_id: str | None = None
     debug: bool = False
+    replay_event_ts: int | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_replay_event_ts(self) -> SearchResultClickRequest:
+        if self.replay_event_ts is not None and not self.debug:
+            raise ValueError("replay_event_ts requires debug=true")
+        return self
 
 
 class UpdatedTopicDelta(ApiModel):

@@ -16,6 +16,7 @@ class ProfileRecentClick(ApiModel):
 class ProfileRecentQuery(ApiModel):
     query_key: str
     query_ts: int
+    confirmed_ts: int | None = None
 
 
 class VectorSummary(ApiModel):

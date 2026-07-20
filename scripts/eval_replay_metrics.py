@@ -107,7 +107,8 @@ def replay_click(base_url: str, event: dict[str, Any]) -> str | None:
         or ("search" if event_type == "search_result_click" else "feed"),
         "answer_id": int(event["answer_id"]),
         "request_id": event.get("request_id") or f"carry-{event.get('event_ts')}",
-        "debug": False,
+        "debug": True,
+        "replay_event_ts": int(event["event_ts"]),
     }
     if event_type == "search_result_click":
         query_key = event.get("matched_query_key") or event.get("query_key")
@@ -176,7 +177,8 @@ def evaluate_user(
                         "query_key": query_key,
                         "query_text": f"Query {query_key}",
                         "page_size": k,
-                        "debug": False,
+                        "debug": True,
+                        "replay_event_ts": int(event["event_ts"]),
                     },
                 )
                 posted["search_query"] += 1

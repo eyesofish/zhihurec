@@ -786,7 +786,8 @@ def build_user_topic_counters(
 def build_query_topic_rows(
     args: argparse.Namespace,
     users: Dict[int, dict],
-    user_topics: Dict[int, Counter],
+    answers: Dict[int, dict],
+    user_clicks: Dict[int, List[Tuple[int, int]]],
     queries_by_user: Dict[int, List[Tuple[int, str, List[int]]]],
     query_freq: Counter,
     query_labels: Dict[str, str] | None = None,
@@ -798,14 +799,26 @@ def build_query_topic_rows(
     query_tokens_lookup: Dict[str, List[int]] = {}
 
     for user_id, query_rows in queries_by_user.items():
-        topic_counter = user_topics.get(user_id, Counter())
-        if not topic_counter:
-            followed = users.get(user_id, {}).get("followed_topic_ids", [])
-            topic_counter = Counter({topic_id: 1 for topic_id in followed})
-        if not topic_counter:
-            continue
-        top_topics = topic_counter.most_common(args.max_user_topics)
-        for _, query_key, query_tokens in query_rows:
+        prior_topics: Counter = Counter()
+        clicks = sorted(user_clicks.get(user_id, []))
+        click_index = 0
+        followed = users.get(user_id, {}).get("followed_topic_ids", [])
+        for query_ts, query_key, query_tokens in sorted(query_rows):
+            while click_index < len(clicks) and clicks[click_index][0] < query_ts:
+                _, answer_id = clicks[click_index]
+                answer = answers.get(answer_id)
+                if answer:
+                    for topic_index, topic_id in enumerate(answer["topic_ids"]):
+                        prior_topics[topic_id] += max(1, 3 - topic_index)
+                click_index += 1
+            evidence_topics = (
+                prior_topics
+                if prior_topics
+                else Counter({topic_id: 1 for topic_id in followed})
+            )
+            if not evidence_topics:
+                continue
+            top_topics = evidence_topics.most_common(args.max_user_topics)
             query_tokens_lookup[query_key] = query_tokens
             for topic_id, weight in top_topics:
                 query_topic_counter[query_key][topic_id] += weight
@@ -845,7 +858,11 @@ def build_query_topic_rows(
                 {
                     "query_key": query_key,
                     "display_query": _query_display_label(query_key, query_labels),
-                    "query_tokens": query_tokens_lookup.get(query_key, parse_space_ids(query_key)),
+                    "query_tokens": (
+                        query_tokens_lookup[query_key]
+                        if query_key in query_tokens_lookup
+                        else parse_space_ids(query_key)
+                    ),
                     "topic_id": topic_id,
                     "score": round(raw_score / total, 6),
                     "evidence_query_count": query_freq[query_key],
@@ -949,12 +966,40 @@ def build_demo_event_replay(
     demo_user_id: int,
     query_rows: Sequence[Tuple[int, str, List[int]]],
     impression_rows: Sequence[Tuple[int, int, int]],
+    answer_topics_by_id: Dict[int, set[int]],
+    query_topics_by_key: Dict[str, set[int]],
     search_window_seconds: int,
     max_replay_events: int,
 ) -> List[dict]:
     queries = sorted(query_rows, key=lambda item: item[0])
     impressions = sorted(impression_rows, key=lambda item: (item[0], item[1], item[2]))
     replay: List[dict] = []
+    matched_clicks: Dict[int, Tuple[int, str, List[int]]] = {}
+    used_queries: set[int] = set()
+
+    clicked_impressions = sorted(
+        (
+            (impression_index, impression_ts, answer_id, click_ts)
+            for impression_index, (impression_ts, answer_id, click_ts) in enumerate(impressions)
+            if click_ts > 0
+        ),
+        key=lambda item: (item[3], item[0]),
+    )
+    for impression_index, _, answer_id, click_ts in clicked_impressions:
+        answer_topics = answer_topics_by_id.get(answer_id, set())
+        eligible = [
+            (query_index, query)
+            for query_index, query in enumerate(queries)
+            if query_index not in used_queries
+            and query[0] <= click_ts
+            and click_ts - query[0] <= search_window_seconds
+            and answer_topics & query_topics_by_key.get(query[1], set())
+        ]
+        if not eligible:
+            continue
+        query_index, matched_query = max(eligible, key=lambda item: item[1][0])
+        used_queries.add(query_index)
+        matched_clicks[impression_index] = matched_query
 
     for query_index, (query_ts, query_key, query_tokens) in enumerate(queries):
         replay.append(
@@ -990,14 +1035,7 @@ def build_demo_event_replay(
         if click_ts <= 0:
             continue
 
-        matched_query = next(
-            (
-                query
-                for query in reversed(queries)
-                if query[0] <= click_ts and click_ts - query[0] <= search_window_seconds
-            ),
-            None,
-        )
+        matched_query = matched_clicks.get(impression_index)
         replay.append(
             {
                 "event_id": (f"raw-click-{demo_user_id}-{click_ts}-{impression_index}-{answer_id}"),
@@ -1008,7 +1046,9 @@ def build_demo_event_replay(
                 "matched_query_key": matched_query[1] if matched_query else None,
                 "request_id": request_id,
                 "surface": "search" if matched_query else "feed",
-                "source_confidence": "heuristic",
+                "source_confidence": (
+                    "heuristic_nearest_topic_overlap" if matched_query else "confirmed"
+                ),
             }
         )
 
@@ -1230,7 +1270,13 @@ def main() -> None:
 
     user_topics, global_topics = build_user_topic_counters(users, answers, user_clicks)
     query_topic_rows = build_query_topic_rows(
-        args, users, user_topics, queries_by_user, query_freq, query_labels
+        args,
+        users,
+        answers,
+        user_clicks,
+        queries_by_user,
+        query_freq,
+        query_labels,
     )
     ranked_answer_ids = rank_answers_by_hotness(answer_impressions, answer_clicks)
     hot_snapshot = build_hot_snapshot(
@@ -1313,6 +1359,13 @@ def main() -> None:
     persona_replay_events: List[List[dict]] = []
     persona_profile_seeds: List[dict] = []
     evaluation_profile_seeds: List[dict] = []
+    query_topics_by_key: Dict[str, set[int]] = defaultdict(set)
+    for row in query_topic_rows:
+        query_topics_by_key[str(row["query_key"])].add(int(row["topic_id"]))
+    answer_topics_by_id = {
+        answer_id: {int(topic_id) for topic_id in answer.get("topic_ids", [])}
+        for answer_id, answer in answers.items()
+    }
     for persona_id in demo_user_ids:
         persona_queries = queries_by_user.get(persona_id, [])
         persona_clicks = user_clicks.get(persona_id, [])
@@ -1320,6 +1373,8 @@ def main() -> None:
             demo_user_id=persona_id,
             query_rows=persona_queries,
             impression_rows=user_impressions.get(persona_id, []),
+            answer_topics_by_id=answer_topics_by_id,
+            query_topics_by_key=query_topics_by_key,
             search_window_seconds=args.search_window_seconds,
             max_replay_events=args.max_replay_events,
         )
@@ -1444,8 +1499,8 @@ def main() -> None:
         "files_written": files_written,
         "heuristics": {
             "hot_score_formula": "click_count * 10 + impression_count",
-            "query_topic_source": "user-level co-occurrence between query keys and clicked-answer topics",
-            "search_click_derivation": "Clicks within search_window_seconds after the latest query are tagged as search_result_click heuristically",
+            "query_topic_source": "cutoff-safe user-level co-occurrence using only clicks before each query event, with followed topics as cold-start fallback",
+            "search_click_derivation": "Each query is matched to at most one nearest subsequent click within search_window_seconds when query and answer topics overlap; attribution remains heuristic because search-result exposures are unavailable",
             "display_text_policy": "display_title, display_summary, display_name, and display_query are synthetic because raw Zhihu text is not available in ZhihuRec",
             "sponsored_policy": "Synthetic campaigns target persona topics; expected spend is bid_micros * predicted_ctr per served impression.",
         },

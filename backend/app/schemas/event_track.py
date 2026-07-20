@@ -29,6 +29,7 @@ class EventTrackRequest(ApiModel):
     sponsored_delivery_id: str | None = None
     dwell_ms: int | None = Field(None, ge=0, le=86_400_000)
     debug: bool = False
+    replay_event_ts: int | None = Field(None, ge=0)
 
     @model_validator(mode="after")
     def validate_event_fields(self) -> EventTrackRequest:
@@ -48,6 +49,8 @@ class EventTrackRequest(ApiModel):
             raise ValueError("search_result_click requires query_key")
         if self.event_type == "dwell" and self.dwell_ms is None:
             raise ValueError("dwell requires dwell_ms")
+        if self.replay_event_ts is not None and not self.debug:
+            raise ValueError("replay_event_ts requires debug=true")
         return self
 
 

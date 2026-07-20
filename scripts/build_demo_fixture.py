@@ -424,6 +424,7 @@ def main() -> None:
         "files_written": files,
         "heuristics": {
             "fixture": "Small deterministic integration dataset; not model evidence.",
+            "search_click_derivation": "Each fixture query has at most one topic-aligned synthetic search click.",
             "sponsored_policy": "expected spend = bid_micros * predicted_ctr",
         },
     }

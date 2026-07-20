@@ -87,6 +87,11 @@ def parse_recent_queries(value: Any) -> list[ProfileRecentQuery]:
         ProfileRecentQuery(
             query_key=str(row["query_key"]),
             query_ts=int(row.get("query_ts") or 0),
+            confirmed_ts=(
+                int(row["confirmed_ts"])
+                if row.get("confirmed_ts") is not None
+                else None
+            ),
         )
         for row in rows
         if "query_key" in row

@@ -21,8 +21,8 @@ Query parameters:
 - `user_id` required;
 - `page_size` 1-50, default 10;
 - `debug` default false;
-- `experiment_arm`: `default`, `manual`, `manual_plus_als`, `lgb_plus_als`, or
-  `lgb_plus_als_plus_search`;
+- `experiment_arm`: `default`, `manual`, `manual_plus_als`, `lgb_plus_als`,
+  `lgb_plus_als_plus_search`, or one of the preregistered decay/gated search arms;
 - `include_sponsored` default true;
 - `request_id`: optional client idempotency key for one logical feed load;
 - `as_of_ts`: evaluation-only boundary for point-in-time popularity features.
@@ -115,6 +115,9 @@ The backend resolves the query, records `search_query`, updates recent-query pro
 state in synchronous modes, retrieves topic-matched answers, and applies hot fallback.
 In `kafka_async`, profile mutation occurs in the consumer.
 
+Evaluation replay may also send `replay_event_ts` when `debug=true`. Product requests
+cannot set a replay timestamp without explicitly entering debug/evaluation mode.
+
 ## `POST /event/track`
 
 Unified product event request:
@@ -149,6 +152,9 @@ All listed event types require `answer_id`; `search_result_click` also requires
 `query_key`, and `dwell` requires `dwell_ms` between 0 and 86,400,000. Frontend impression IDs are deterministic per
 `(user_id, request_id, answer_id)`, and `user_event.external_event_id` makes retries
 idempotent.
+
+`replay_event_ts` is likewise accepted only when `debug=true`, allowing chronological
+offline replay without exposing timestamp overrides in normal product requests.
 
 Profile semantics:
 

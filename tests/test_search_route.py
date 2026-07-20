@@ -54,6 +54,15 @@ def test_search_blank_inputs_are_rejected(unwired_client):
     assert response.status_code == 422
 
 
+def test_search_replay_timestamp_requires_debug(unwired_client):
+    response = unwired_client.post(
+        "/search",
+        json={"user_id": 7248, "query_key": "1", "replay_event_ts": 100},
+    )
+
+    assert response.status_code == 422
+
+
 def test_search_unresolved_text_returns_422_with_error_code():
     from backend.app.errors import UnresolvedQueryError
     from backend.app.schemas.search import SearchRequest
