@@ -148,6 +148,7 @@ and a durable training-message outbox. It is not end-to-end exactly-once.
 | Local operations | `docs/v1_local_runbook.md` |
 | Data analysis | `docs/data_analysis_report.md` |
 | Product/HCI walkthrough | `docs/hci_report.md` |
+| MIND-small inspection and ALS split decision | `docs/mind_data_inspection.md` |
 | Original project boundary | `plan/project_brief_zh.md` |
 
 ## Development gates
