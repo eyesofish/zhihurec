@@ -2,20 +2,26 @@ import { ArrowUp, ArrowDown } from "lucide-react";
 import { trackEvent } from "../api/client";
 
 interface Props {
-  answerId: number;
+  articleId: number;
   userId: number;
   requestId?: string;
   surface?: string;
   onVoted?: () => void;
 }
 
-export default function VoteActions({ answerId, userId, requestId, surface = "feed", onVoted }: Props) {
+export default function VoteActions({
+  articleId,
+  userId,
+  requestId,
+  surface = "feed",
+  onVoted,
+}: Props) {
   const handleVote = (direction: "upvote" | "downvote") => {
     trackEvent({
       user_id: userId,
       event_type: direction,
       surface,
-      answer_id: answerId,
+      article_id: articleId,
       request_id: requestId ?? null,
     }).then(() => onVoted?.());
   };

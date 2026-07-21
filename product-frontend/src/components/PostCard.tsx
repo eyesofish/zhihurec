@@ -1,4 +1,4 @@
-import { MessageCircle, Share2 } from "lucide-react";
+import { Newspaper, Share2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { FeedItem, SearchItem } from "../api/types";
 import VoteActions from "./VoteActions";
@@ -26,13 +26,13 @@ export default function PostCard({
   onTrackClick,
   onProfileChanged,
 }: Props) {
-  const mainTopic = item.topics?.[0];
-  const communityName = mainTopic ? `r/topic-${mainTopic.topic_id}` : "r/zhihurec";
+  const mainCategory = item.categories?.[0];
+  const categoryName = mainCategory?.display_name ?? "News";
 
   return (
     <div className="zr-card">
       <VoteActions
-        answerId={item.answer_id}
+        articleId={item.article_id}
         userId={userId}
         requestId={requestId}
         surface={surface}
@@ -45,28 +45,28 @@ export default function PostCard({
             <span
               className="zr-card__avatar"
               style={{
-                background: `linear-gradient(135deg, hsl(${(mainTopic?.topic_id ?? 1) * 47 % 360}, 60%, 55%), hsl(${(mainTopic?.topic_id ?? 1) * 83 % 360}, 70%, 65%))`,
+                background: `linear-gradient(135deg, hsl(${(mainCategory?.topic_id ?? 1) * 47 % 360}, 60%, 55%), hsl(${(mainCategory?.topic_id ?? 1) * 83 % 360}, 70%, 65%))`,
               }}
             />
-            {communityName}
+            {categoryName}
           </span>
           {isFeedItem(item) && item.content_type === "sponsored" && (
             <span className="zr-card__sponsored">{item.sponsored?.label ?? "Sponsored"}</span>
           )}
-          {"author" in item && <span>Posted by u/user-{item.author.author_id}</span>}
+          <span>Source: {item.source_domain}</span>
         </div>
 
         <h3 className="zr-card__title">
-          <Link to={`/post/${item.answer_id}`} onClick={onTrackClick}>
-            {item.question_title}
+          <Link to={`/articles/${item.article_id}`} onClick={onTrackClick}>
+            {item.headline}
           </Link>
         </h3>
 
-        <p className="zr-card__summary">{item.answer_summary}</p>
+        <p className="zr-card__summary">{item.abstract}</p>
 
-        {item.topics.length > 0 && (
+        {item.categories.length > 0 && (
           <div className="zr-card__chips">
-            {item.topics.map((t) => (
+            {item.categories.map((t) => (
               <span key={t.topic_id} className="zr-chip">
                 {t.display_name}
               </span>
@@ -79,9 +79,13 @@ export default function PostCard({
         )}
 
         <div className="zr-card__actions">
-          <Link to={`/post/${item.answer_id}`} className="zr-action" onClick={onTrackClick}>
-            <MessageCircle size={16} />
-            Comments
+          <Link
+            to={`/articles/${item.article_id}`}
+            className="zr-action"
+            onClick={onTrackClick}
+          >
+            <Newspaper size={16} />
+            Details
           </Link>
           <button className="zr-action">
             <Share2 size={16} />

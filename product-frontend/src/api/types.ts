@@ -3,11 +3,6 @@ export interface TopicCard {
   display_name: string;
 }
 
-export interface AuthorCard {
-  author_id: number;
-  display_name: string;
-}
-
 export interface ProfileTopicWeight {
   topic_id: number;
   weight: number;
@@ -34,13 +29,12 @@ export interface SuggestionListResponse {
   items: SuggestionItem[];
 }
 
-export interface AnswerCardResponse {
-  answer_id: number;
-  question_id: number;
-  question_title: string;
-  answer_summary: string;
-  author: AuthorCard;
-  topics: TopicCard[];
+export interface ArticleCardResponse {
+  article_id: number;
+  headline: string;
+  abstract: string;
+  source_domain: string;
+  categories: TopicCard[];
 }
 
 export interface FeedItemScores {
@@ -61,12 +55,11 @@ export interface SponsoredFeedMetadata {
 }
 
 export interface FeedItem {
-  answer_id: number;
-  question_id: number;
-  question_title: string;
-  answer_summary: string;
-  author: AuthorCard;
-  topics: TopicCard[];
+  article_id: number;
+  headline: string;
+  abstract: string;
+  source_domain: string;
+  categories: TopicCard[];
   selected_reason: string;
   scores: FeedItemScores;
   recall_sources: string[];
@@ -89,11 +82,11 @@ export interface SearchItemScores {
 }
 
 export interface SearchItem {
-  answer_id: number;
-  question_id: number;
-  question_title: string;
-  answer_summary: string;
-  topics: TopicCard[];
+  article_id: number;
+  headline: string;
+  abstract: string;
+  source_domain: string;
+  categories: TopicCard[];
   scores: SearchItemScores;
 }
 
@@ -106,7 +99,7 @@ export interface SearchResponse {
 }
 
 export interface ProfileRecentClick {
-  answer_id: number;
+  article_id: number;
   click_ts: number;
 }
 
@@ -125,7 +118,7 @@ export interface DebugProfileResponse {
   cold_start_seed_key: string;
   behavior_score: number;
   topic_weights: ProfileTopicWeight[];
-  recent_clicked_answers: ProfileRecentClick[];
+  recent_clicked_articles: ProfileRecentClick[];
   recent_queries: ProfileRecentQuery[];
   vector_summary?: DebugVectorSummary;
 }
@@ -145,7 +138,7 @@ export interface EventTrackRequest {
   user_id: number;
   event_type: EventTrackType;
   surface: string;
-  answer_id?: number | null;
+  article_id?: number | null;
   query_key?: string | null;
   request_id?: string | null;
   sponsored_delivery_id?: string | null;

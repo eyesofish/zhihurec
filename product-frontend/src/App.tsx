@@ -4,7 +4,7 @@ import RightRail from "./components/RightRail";
 import TopNav from "./components/TopNav";
 import { PersonaProvider } from "./context/PersonaContext";
 import FeedPage from "./pages/FeedPage";
-import PostDetailPage from "./pages/PostDetailPage";
+import ArticleDetailPage from "./pages/ArticleDetailPage";
 import SearchPage from "./pages/SearchPage";
 
 export default function App() {
@@ -16,7 +16,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<FeedPage />} />
           <Route path="/search" element={<SearchPage />} />
-          <Route path="/post/:answerId" element={<PostDetailPage />} />
+          <Route path="/articles/:articleId" element={<ArticleDetailPage />} />
         </Routes>
         <RightRail />
       </div>

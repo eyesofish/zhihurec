@@ -70,7 +70,7 @@ export default function SearchBox({ initialQuery }: Props) {
         <Search size={18} color="var(--zr-text-muted)" />
         <input
           className="zr-searchbox__input"
-          placeholder="Search zhihurec"
+          placeholder="Search news"
           value={query}
           onChange={(e) => handleChange(e.target.value)}
           onFocus={() => setOpen(true)}

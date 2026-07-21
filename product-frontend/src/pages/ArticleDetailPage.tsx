@@ -1,24 +1,24 @@
 import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getAnswerCard, trackEvent } from "../api/client";
-import type { AnswerCardResponse } from "../api/types";
+import { getArticleCard, trackEvent } from "../api/client";
+import type { ArticleCardResponse } from "../api/types";
 import { usePersona } from "../context/PersonaContext";
 
-export default function PostDetailPage() {
-  const { answerId: answerIdParam } = useParams<{ answerId: string }>();
-  const answerId = Number(answerIdParam);
+export default function ArticleDetailPage() {
+  const { articleId: articleIdParam } = useParams<{ articleId: string }>();
+  const articleId = Number(articleIdParam);
   const { selectedPersona, bumpProfile } = usePersona();
-  const [data, setData] = useState<AnswerCardResponse | null>(null);
+  const [data, setData] = useState<ArticleCardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!answerId || isNaN(answerId)) return;
+    if (!articleId || isNaN(articleId)) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getAnswerCard(answerId)
+    getArticleCard(articleId)
       .then((res) => {
         if (cancelled) return;
         setData(res);
@@ -34,22 +34,22 @@ export default function PostDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [answerId]);
+  }, [articleId]);
 
   useEffect(() => {
     if (!data || !selectedPersona) return;
     trackEvent({
       user_id: selectedPersona.user_id,
       event_type: "detail_view",
-      surface: "post_detail",
-      answer_id: data.answer_id,
+      surface: "article_detail",
+      article_id: data.article_id,
     }).then(() => bumpProfile());
   }, [data, selectedPersona, bumpProfile]);
 
-  if (isNaN(answerId)) {
+  if (isNaN(articleId)) {
     return (
       <main className="zr-center">
-        <div className="zr-status">Invalid post ID.</div>
+        <div className="zr-status">Invalid article ID.</div>
       </main>
     );
   }
@@ -57,7 +57,7 @@ export default function PostDetailPage() {
   if (loading) {
     return (
       <main className="zr-center">
-        <div className="zr-status">Loading post...</div>
+        <div className="zr-status">Loading article...</div>
       </main>
     );
   }
@@ -65,7 +65,7 @@ export default function PostDetailPage() {
   if (error) {
     return (
       <main className="zr-center">
-        <div className="zr-status">Failed to load post: {error}</div>
+        <div className="zr-status">Failed to load article: {error}</div>
       </main>
     );
   }
@@ -73,12 +73,12 @@ export default function PostDetailPage() {
   if (!data) {
     return (
       <main className="zr-center">
-        <div className="zr-status">Post not found.</div>
+        <div className="zr-status">Article not found.</div>
       </main>
     );
   }
 
-  const mainTopic = data.topics?.[0];
+  const mainCategory = data.categories?.[0];
 
   return (
     <main className="zr-center">
@@ -89,25 +89,25 @@ export default function PostDetailPage() {
         </Link>
 
         <div className="zr-card__meta">
-          {mainTopic && (
+          {mainCategory && (
             <span className="zr-card__community">
               <span
                 className="zr-card__avatar"
                 style={{
-                  background: `linear-gradient(135deg, hsl(${mainTopic.topic_id * 47 % 360}, 60%, 55%), hsl(${mainTopic.topic_id * 83 % 360}, 70%, 65%))`,
+                  background: `linear-gradient(135deg, hsl(${mainCategory.topic_id * 47 % 360}, 60%, 55%), hsl(${mainCategory.topic_id * 83 % 360}, 70%, 65%))`,
                 }}
               />
-              r/topic-{mainTopic.topic_id}
+              {mainCategory.display_name}
             </span>
           )}
-          <span>Posted by u/user-{data.author.author_id}</span>
+          <span>Source: {data.source_domain}</span>
         </div>
 
-        <h1 className="zr-post-detail__title">{data.question_title}</h1>
+        <h1 className="zr-post-detail__title">{data.headline}</h1>
 
-        {data.topics.length > 0 && (
+        {data.categories.length > 0 && (
           <div className="zr-card__chips">
-            {data.topics.map((t) => (
+            {data.categories.map((t) => (
               <span key={t.topic_id} className="zr-chip">
                 {t.display_name}
               </span>
@@ -115,7 +115,7 @@ export default function PostDetailPage() {
           </div>
         )}
 
-        <div className="zr-post-detail__summary">{data.answer_summary}</div>
+        <div className="zr-post-detail__summary">{data.abstract}</div>
       </div>
     </main>
   );

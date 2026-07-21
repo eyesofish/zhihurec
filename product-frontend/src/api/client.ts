@@ -1,5 +1,5 @@
 import type {
-  AnswerCardResponse,
+  ArticleCardResponse,
   DebugProfileResponse,
   EventTrackRequest,
   EventTrackResponse,
@@ -97,8 +97,8 @@ export function postSearch(
   });
 }
 
-export function getAnswerCard(answerId: number): Promise<AnswerCardResponse> {
-  return request<AnswerCardResponse>(`/answers/${answerId}`);
+export function getArticleCard(articleId: number): Promise<ArticleCardResponse> {
+  return request<ArticleCardResponse>(`/articles/${articleId}`);
 }
 
 export function getDebugProfile(userId: number): Promise<DebugProfileResponse> {

@@ -28,18 +28,18 @@ export default function LeftSidebar() {
       </div>
 
       <div className="zr-left__section">
-        <div className="zr-left__section-title">Communities</div>
-        {[1, 2, 3].map((id) => (
-          <Link key={id} to="/" className="zr-left__item">
+        <div className="zr-left__section-title">News Categories</div>
+        {["Sports", "Finance", "Science"].map((category, index) => (
+          <Link key={category} to="/" className="zr-left__item">
             <span
               className="zr-card__avatar"
               style={{
                 width: 24,
                 height: 24,
-                background: `linear-gradient(135deg, hsl(${id * 47 % 360}, 60%, 55%), hsl(${id * 83 % 360}, 70%, 65%))`,
+                background: `linear-gradient(135deg, hsl(${(index + 1) * 47 % 360}, 60%, 55%), hsl(${(index + 1) * 83 % 360}, 70%, 65%))`,
               }}
             />
-            <span>r/topic-{id}</span>
+            <span>{category}</span>
           </Link>
         ))}
       </div>

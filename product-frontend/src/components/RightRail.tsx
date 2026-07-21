@@ -7,9 +7,9 @@ export default function RightRail() {
   return (
     <aside className="zr-right">
       <div className="zr-rail-card">
-        <div className="zr-rail-card__title">Recent Posts</div>
+        <div className="zr-rail-card__title">Recent Articles</div>
         <div style={{ fontSize: 13, color: "var(--zr-text-muted)" }}>
-          Browse the feed and click posts to see them here.
+          Browse the feed and open articles to see them here.
         </div>
       </div>
 

@@ -65,7 +65,7 @@ export default function FeedPage() {
     const pending = items
       .map((item) => ({
         item,
-        key: `${selectedPersona.user_id}:${requestId}:${item.answer_id}`,
+        key: `${selectedPersona.user_id}:${requestId}:${item.article_id}`,
       }))
       .filter(({ key }) => !trackedRef.current.has(key));
     if (pending.length === 0) return;
@@ -79,7 +79,7 @@ export default function FeedPage() {
           user_id: selectedPersona.user_id,
           event_type: "feed_impression",
           surface: "feed",
-          answer_id: item.answer_id,
+          article_id: item.article_id,
           request_id: requestId,
           sponsored_delivery_id: item.sponsored?.delivery_id ?? null,
         }),
@@ -104,13 +104,13 @@ export default function FeedPage() {
   const handleClick = useCallback(
     (item: FeedItem) => {
       if (!selectedPersona) return;
-      const answerId = item.answer_id;
+      const articleId = item.article_id;
       void trackEvent({
-        event_id: `click-${selectedPersona.user_id}:${requestId}:${answerId}`,
+        event_id: `click-${selectedPersona.user_id}:${requestId}:${articleId}`,
         user_id: selectedPersona.user_id,
         event_type: "recommendation_click",
         surface: "feed",
-        answer_id: answerId,
+        article_id: articleId,
         request_id: requestId,
         sponsored_delivery_id: item.sponsored?.delivery_id ?? null,
       })
@@ -148,12 +148,12 @@ export default function FeedPage() {
       {trackingError && <div className="zr-status">{trackingError}</div>}
 
       {!loading && visibleItems.length === 0 && (
-        <div className="zr-status">No posts in feed. Try selecting a different persona.</div>
+        <div className="zr-status">No articles in feed. Try selecting a different persona.</div>
       )}
 
       {visibleItems.map((item) => (
         <PostCard
-          key={item.answer_id}
+          key={item.article_id}
           item={item}
           userId={selectedPersona.user_id}
           requestId={requestId}

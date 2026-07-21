@@ -30,19 +30,18 @@ vi.mock("../api/client", () => ({
 }));
 
 vi.mock("../components/PostCard", () => ({
-  default: ({ item }: { item: { answer_id: number } }) => (
-    <div data-testid={`post-${item.answer_id}`}>{item.answer_id}</div>
+  default: ({ item }: { item: { article_id: number } }) => (
+    <div data-testid={`article-${item.article_id}`}>{item.article_id}</div>
   ),
 }));
 
 const feedItems = [
   {
-    answer_id: 301,
-    question_id: 201,
-    question_title: "First",
-    answer_summary: "First answer",
-    author: { author_id: 101, display_name: "Author" },
-    topics: [],
+    article_id: 301,
+    headline: "First",
+    abstract: "First article",
+    source_domain: "news.example.com",
+    categories: [],
     selected_reason: "Profile",
     scores: {
       base_recall_score: 1,
@@ -57,12 +56,11 @@ const feedItems = [
     content_type: "organic" as const,
   },
   {
-    answer_id: 302,
-    question_id: 202,
-    question_title: "Second",
-    answer_summary: "Second answer",
-    author: { author_id: 102, display_name: "Author" },
-    topics: [],
+    article_id: 302,
+    headline: "Second",
+    abstract: "Second article",
+    source_domain: "sports.example.com",
+    categories: [],
     selected_reason: "Profile",
     scores: {
       base_recall_score: 0.9,
@@ -95,7 +93,7 @@ describe("FeedPage impressions", () => {
     });
   });
 
-  it("records one answer-scoped impression for each item", async () => {
+  it("records one article-scoped impression for each item", async () => {
     render(<FeedPage />);
 
     await waitFor(() => expect(trackEvent).toHaveBeenCalledTimes(2));
@@ -104,7 +102,7 @@ describe("FeedPage impressions", () => {
       expect.objectContaining({
         event_id: "imp-7248:feed-request-1:301",
         user_id: 7248,
-        answer_id: 301,
+        article_id: 301,
         request_id: "feed-request-1",
       }),
     );
@@ -112,13 +110,13 @@ describe("FeedPage impressions", () => {
       expect.objectContaining({
         event_id: "imp-7248:feed-request-1:302",
         user_id: 7248,
-        answer_id: 302,
+        article_id: 302,
         request_id: "feed-request-1",
       }),
     );
   });
 
-  it("tracks the same answers again for a different persona", async () => {
+  it("tracks the same articles again for a different persona", async () => {
     const rendered = render(<FeedPage />);
     await waitFor(() => expect(trackEvent).toHaveBeenCalledTimes(2));
 
@@ -136,7 +134,7 @@ describe("FeedPage impressions", () => {
       expect.objectContaining({
         event_id: "imp-1026:feed-request-2:301",
         user_id: 1026,
-        answer_id: 301,
+        article_id: 301,
       }),
     );
   });
@@ -169,7 +167,7 @@ describe("FeedPage impressions", () => {
     });
     await waitFor(() =>
       expect(trackEvent).toHaveBeenCalledWith(
-        expect.objectContaining({ user_id: 1026, answer_id: 301 }),
+        expect.objectContaining({ user_id: 1026, article_id: 301 }),
       ),
     );
   });
@@ -197,7 +195,7 @@ describe("FeedPage impressions", () => {
     await waitFor(() =>
       expect(trackEvent).toHaveBeenCalledWith(
         expect.objectContaining({
-          answer_id: 301,
+          article_id: 301,
           sponsored_delivery_id: "ad-delivery-1",
         }),
       ),

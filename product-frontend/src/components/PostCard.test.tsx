@@ -5,12 +5,11 @@ import PostCard from "./PostCard";
 import type { FeedItem } from "../api/types";
 
 const sponsoredItem: FeedItem = {
-  answer_id: 301,
-  question_id: 201,
-  question_title: "Sponsored backend answer",
-  answer_summary: "A sponsored answer summary.",
-  author: { author_id: 101, display_name: "Author" },
-  topics: [{ topic_id: 1, display_name: "Backend" }],
+  article_id: 301,
+  headline: "Sponsored finance briefing",
+  abstract: "A sponsored news summary.",
+  source_domain: "finance.example.com",
+  categories: [{ topic_id: 1, display_name: "Finance" }],
   selected_reason: "Sponsored candidate",
   scores: {
     base_recall_score: 0,
@@ -41,5 +40,8 @@ describe("PostCard", () => {
     );
 
     expect(screen.getByText("Sponsored")).toBeInTheDocument();
+    expect(screen.getByText("Source: finance.example.com")).toBeInTheDocument();
+    expect(screen.getByText("Details")).toBeInTheDocument();
+    expect(screen.queryByText(/Posted by|Comments|r\//)).not.toBeInTheDocument();
   });
 });
