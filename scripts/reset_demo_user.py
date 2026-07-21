@@ -21,7 +21,7 @@ class MysqlUrl:
 
 
 def parse_args() -> argparse.Namespace:
-    seed_dir = os.getenv("ZHIHUREC_DEMO_SEED_DIR", "build/demo_world")
+    seed_dir = os.getenv("ZHIHUREC_DEMO_SEED_DIR", "build/mind_demo_world")
     parser = argparse.ArgumentParser(
         description=(
             "Reset ZhihuRec demo user profiles. By default all personas in the "
@@ -104,8 +104,8 @@ def load_seeds(persona_seeds_path: Path, legacy_seed_path: Path) -> list[dict]:
     if legacy_seed_path.exists():
         payload = json.loads(legacy_seed_path.read_text(encoding="utf-8"))
         return [payload]
-    fixture_personas = ROOT / "build" / "demo_fixture" / "demo_persona_profile_seeds.json"
-    fixture_legacy = ROOT / "build" / "demo_fixture" / "demo_user_profile_seed.json"
+    fixture_personas = ROOT / "build" / "mind_demo_fixture" / "demo_persona_profile_seeds.json"
+    fixture_legacy = ROOT / "build" / "mind_demo_fixture" / "demo_user_profile_seed.json"
     if fixture_personas.exists():
         payload = json.loads(fixture_personas.read_text(encoding="utf-8"))
         if not isinstance(payload, list):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -59,7 +60,7 @@ def _database_url() -> str:
 
 @pytest.fixture
 def mysql_demo_user() -> int:
-    """Reset demo user 7248 before each test so mutable state is predictable."""
+    """Reset the configured first demo persona so mutable state is predictable."""
     if not _database_url():
         pytest.skip("ZHIHUREC_DATABASE_URL not set")
     subprocess.run(
@@ -67,7 +68,14 @@ def mysql_demo_user() -> int:
         check=True,
         cwd=ROOT,
     )
-    return 7248
+    seed_dir = Path(os.environ.get("ZHIHUREC_DEMO_SEED_DIR", "build/mind_demo_world"))
+    if not seed_dir.is_absolute():
+        seed_dir = ROOT / seed_dir
+    seed_path = seed_dir / "demo_user_profile_seed.json"
+    if not seed_path.is_file():
+        seed_path = ROOT / "build" / "mind_demo_fixture" / "demo_user_profile_seed.json"
+    seed = json.loads(seed_path.read_text(encoding="utf-8"))
+    return int(seed["user_id"])
 
 
 @pytest.fixture

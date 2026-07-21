@@ -21,7 +21,7 @@ class MysqlUrl:
 
 
 def parse_args() -> argparse.Namespace:
-    seed_dir = os.getenv("ZHIHUREC_DEMO_SEED_DIR", "build/demo_world")
+    seed_dir = os.getenv("ZHIHUREC_DEMO_SEED_DIR", "build/mind_demo_world")
     parser = argparse.ArgumentParser(
         description="Apply ZhihuRec V1 schema and demo seed SQL to MySQL."
     )
@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--fixture-dir",
-        default="build/demo_fixture",
+        default="build/mind_demo_fixture",
         help="Generated compact fixture directory used when --seed-sql is missing.",
     )
     parser.add_argument(
@@ -136,7 +136,7 @@ def prepare_seed_sql(seed_sql: Path, fixture_dir: Path) -> Path:
     subprocess.run(
         [
             sys.executable,
-            str(ROOT / "scripts" / "build_demo_fixture.py"),
+            str(ROOT / "scripts" / "build_mind_demo_fixture.py"),
             "--output-dir",
             str(fixture_dir),
         ],
