@@ -23,7 +23,7 @@ _MODEL: lgb.Booster | None = None
 _FEATURE_ORDER: list[str] = []
 _METADATA: dict[str, Any] = {}
 _MODEL_SIGNATURE: tuple[int, int] | None = None
-FEATURE_SCHEMA_VERSION = 2
+FEATURE_SCHEMA_VERSION = 3
 RANKER_FEATURE_COLUMNS = (
     "base_score",
     "personalized_topic_score",
@@ -46,7 +46,7 @@ RANKER_FEATURE_COLUMNS = (
 
 def load_model(model_dir: str | None = None) -> lgb.Booster | None:
     global _MODEL, _FEATURE_ORDER, _METADATA, _MODEL_SIGNATURE
-    base = Path(model_dir or environment_value("NEWSREC_MODEL_DIR") or "build")
+    base = Path(model_dir or environment_value("NEWSREC_MODEL_DIR") or "build/mind_models")
     model_path = base / "lgb_ranker_v1.txt"
     meta_path = base / "lgb_ranker_v1_meta.json"
 
@@ -135,10 +135,10 @@ def build_feature_dict(
     create_ts = int(answer_row.get("create_ts") or 0)
     if now_ts is None:
         now_ts = _time.time()
-    age_hours = (now_ts - create_ts) / 3600.0 if create_ts > 0 else 0.0
+    age_hours = max(0.0, (now_ts - create_ts) / 3600.0) if create_ts > 0 else 0.0
 
     return {
-        "base_score": round(hot / max_hot_score, 6) if max_hot_score > 0 else 0.0,
+        "base_score": round(hot / (hot + 100.0), 6) if hot > 0 else 0.0,
         "personalized_topic_score": round(personalized, 6),
         "default_topic_score": round(default_ts, 6),
         "topic_match_score": round(topic_match, 6),

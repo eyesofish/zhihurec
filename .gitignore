@@ -54,6 +54,7 @@ logs/
 /build/mind_normalized/
 /build/mind_demo_world/
 /build/mind_demo_fixture/
+/build/mind_models/
 
 # Generated offline build artifacts and import packages
 /build/demo_world/

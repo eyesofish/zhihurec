@@ -17,7 +17,7 @@ from backend.app.config import environment_value
 
 class ALSRecall:
     def __init__(self, build_dir: str | None = None) -> None:
-        base = Path(build_dir or environment_value("NEWSREC_MODEL_DIR") or "build")
+        base = Path(build_dir or environment_value("NEWSREC_MODEL_DIR") or "build/mind_models")
         self._index_path = base / "faiss_index.bin"
         self._user_emb_path = base / "als_user_embeddings.npy"
         self._item_emb_path = base / "als_item_embeddings.npy"

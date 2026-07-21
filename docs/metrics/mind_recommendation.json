@@ -1,0 +1,109 @@
+{
+  "als": {
+    "factors": 32,
+    "iterations": 10,
+    "known_user_request_coverage": 0.847,
+    "official_dev_known_user_coverage": 0.114392,
+    "unknown_user_behavior": "return no collaborative candidates"
+  },
+  "conclusion": "LightGBM exceeded the strongest tested baseline, but ALS did not add a measurable sampled Recall@10 gain.",
+  "dataset": "MIND-small",
+  "intent_metrics": "docs/metrics/mind_intent_mechanism.json",
+  "limitations": [
+    "LightGBM uses a deterministic request sample for tractable local training.",
+    "MIND has no observed search logs; intent mechanism evidence is reported separately.",
+    "Official dev is primarily a cold-start surface and is not presented as a known-user ALS benchmark.",
+    "Article age uses first appearance in selected MIND impressions, not publication time."
+  ],
+  "normalized_fingerprint": "643c53b0ce5fddf5e08a8d6f8e491ddec607a3f56c335c44d872e6e74cbd4b52",
+  "official_dev_cold_start": {
+    "content_category_fallback": {
+      "category_diversity@10": 4.736014,
+      "mrr": 0.254441,
+      "ndcg@10": 0.304853,
+      "ndcg@5": 0.238325,
+      "recall@10": 0.556825,
+      "recall@5": 0.364881,
+      "request_failures": 0,
+      "requests": 8902
+    },
+    "sampled_requests": 10000,
+    "unknown_user_requests": 8902
+  },
+  "pointwise": {
+    "log_loss": 0.15158,
+    "pr_auc": 0.073821,
+    "roc_auc": 0.671883
+  },
+  "ranking_arms": {
+    "als_recall_lightgbm": {
+      "candidate_recall@50": 0.026195,
+      "category_diversity@10": 4.4249,
+      "known_user_request_coverage": 0.847,
+      "mrr": 0.329238,
+      "ndcg@10": 0.362721,
+      "ndcg@5": 0.30145,
+      "recall@10": 0.596746,
+      "recall@5": 0.421185,
+      "request_failures": 0,
+      "requests": 10000
+    },
+    "als_recall_manual": {
+      "candidate_recall@50": 0.026195,
+      "category_diversity@10": 4.2596,
+      "known_user_request_coverage": 0.847,
+      "mrr": 0.233665,
+      "ndcg@10": 0.270454,
+      "ndcg@5": 0.211507,
+      "recall@10": 0.502794,
+      "recall@5": 0.332405,
+      "request_failures": 0,
+      "requests": 10000
+    },
+    "category_profile_manual": {
+      "category_diversity@10": 4.2582,
+      "mrr": 0.233443,
+      "ndcg@10": 0.270269,
+      "ndcg@5": 0.211378,
+      "recall@10": 0.50266,
+      "recall@5": 0.332455,
+      "request_failures": 0,
+      "requests": 10000
+    },
+    "lightgbm": {
+      "category_diversity@10": 4.4234,
+      "mrr": 0.329533,
+      "ndcg@10": 0.362955,
+      "ndcg@5": 0.301675,
+      "recall@10": 0.596866,
+      "recall@5": 0.421278,
+      "request_failures": 0,
+      "requests": 10000
+    },
+    "popularity": {
+      "category_diversity@10": 5.4567,
+      "mrr": 0.216696,
+      "ndcg@10": 0.254109,
+      "ndcg@5": 0.192125,
+      "recall@10": 0.483137,
+      "recall@5": 0.302838,
+      "request_failures": 0,
+      "requests": 10000
+    }
+  },
+  "split": {
+    "all_test_requests": 31393,
+    "all_train_requests": 125572,
+    "request_leakage": 0,
+    "sampled_test_requests": 10000,
+    "sampled_train_requests": 20000,
+    "strategy": "global chronological request holdout inside train",
+    "training_cutoff_ts": 1573677386
+  },
+  "system": {
+    "als_training_seconds": 0.64,
+    "artifact_size_bytes": 9088247,
+    "lightgbm_training_seconds": 1.517,
+    "total_pipeline_seconds": 24.815
+  }
+}

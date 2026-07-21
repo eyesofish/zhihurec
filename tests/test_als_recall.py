@@ -50,3 +50,4 @@ def test_faiss_recall_matches_numpy_inner_product(tmp_path: Path):
     assert [answer_id for answer_id, _ in results] == [
         [301, 302, 303][index] for index in expected_order
     ]
+    assert ALSRecall(str(tmp_path)).get_candidates(999999, k=3) == []
