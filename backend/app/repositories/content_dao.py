@@ -335,6 +335,7 @@ def load_search_candidates(
     connection: Any,
     query_key: str,
     page_size: int,
+    query_text: str | None = None,
 ) -> dict[int, dict[str, Any]]:
     limit = max(page_size * 20, 50)
     with connection.cursor() as cursor:
@@ -364,6 +365,67 @@ def load_search_candidates(
         }
         for row in rows
     }
+
+    normalized_text = " ".join((query_text or "").lower().split())
+    tokens = [token for token in normalized_text.split() if len(token) >= 3][:5]
+    search_terms = [term for term in (normalized_text, *tokens) if len(term) >= 3]
+    search_terms = list(dict.fromkeys(search_terms))
+    if search_terms:
+        predicates = []
+        predicate_params: list[object] = []
+        score_parts = []
+        score_params: list[object] = []
+        for term in search_terms:
+            predicates.append(
+                "(LOWER(q.display_title) LIKE %s OR LOWER(a.display_summary) LIKE %s)"
+            )
+            contains = f"%{term}%"
+            predicate_params.extend((contains, contains))
+            score_parts.append(
+                "(CASE WHEN LOWER(q.display_title) LIKE %s THEN 2 ELSE 0 END "
+                "+ CASE WHEN LOWER(a.display_summary) LIKE %s THEN 1 ELSE 0 END)"
+            )
+            score_params.extend((contains, contains))
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                  a.answer_id,
+                  ({" + ".join(score_parts)}) AS lexical_score,
+                  a.hot_score
+                FROM answer a
+                JOIN question q ON q.question_id = a.question_id
+                WHERE {" OR ".join(predicates)}
+                ORDER BY lexical_score DESC, a.hot_score DESC, a.answer_id ASC
+                LIMIT %s
+                """,
+                (
+                    *score_params,
+                    *predicate_params,
+                    limit,
+                ),
+            )
+            lexical_rows = cursor.fetchall()
+        for row in lexical_rows:
+            article_id = int(row["answer_id"])
+            lexical_score = float(row.get("lexical_score") or 0.0) / (3.0 * len(search_terms))
+            is_new = article_id not in candidates
+            candidate: dict[str, Any] = candidates.setdefault(
+                article_id,
+                {
+                    "source": "lexical_match",
+                    "topic_match_score": 0.0,
+                    "hot_score": float(row.get("hot_score") or 0.0),
+                },
+            )
+            if is_new:
+                candidate["source"] = "lexical_match"
+            elif "lexical_match" not in str(candidate["source"]):
+                candidate["source"] = f"{candidate['source']}+lexical_match"
+            candidate["topic_match_score"] = max(
+                float(candidate["topic_match_score"]),
+                lexical_score,
+            )
 
     if len(candidates) < page_size:
         for row in load_hot_fallback_rows(connection, max(page_size * 5, 20)):

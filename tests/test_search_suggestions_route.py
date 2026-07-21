@@ -30,6 +30,15 @@ def test_search_suggestions_returns_submit_ready_query_keys(mysql_client, mysql_
     query_key = body["items"][0]["query_key"]
     search = mysql_client.post(
         "/search",
-        json={"user_id": mysql_demo_user, "query_key": query_key, "page_size": 5},
+        json={
+            "user_id": mysql_demo_user,
+            "query_key": query_key,
+            "page_size": 5,
+            "debug": True,
+        },
     )
     assert search.status_code == 200, search.text
+    assert all(
+        "lexical_match" not in source["source"]
+        for source in search.json()["debug"]["result_sources"]
+    )

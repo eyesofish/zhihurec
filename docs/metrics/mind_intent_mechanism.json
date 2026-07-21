@@ -1,0 +1,45 @@
+{
+  "aggregate": {
+    "changed_scenario_count": 1,
+    "mean_target_share_delta_at_k": 0.2
+  },
+  "conclusion": "Injected category intent changed target-category alignment in 1 of 3 deterministic scenarios. The effect is not uniform and is mechanism evidence only.",
+  "dataset": "mind_small",
+  "evidence_boundary": "Deterministic intent injection over the demo ranking formula. MIND contains no observed search logs, so this does not estimate CTR, causal lift, or user benefit.",
+  "metric_type": "deterministic_intent_mechanism",
+  "scenario_count": 3,
+  "scenarios": [
+    {
+      "baseline_primary_topic_diversity_at_k": 1,
+      "baseline_target_share_at_k": 0.0,
+      "injected_primary_topic_diversity_at_k": 1,
+      "injected_target_share_at_k": 0.0,
+      "persona": "Autos Reader",
+      "query": "entertainment",
+      "target_share_delta_at_k": 0.0,
+      "target_topic_id": 2
+    },
+    {
+      "baseline_primary_topic_diversity_at_k": 1,
+      "baseline_target_share_at_k": 0.0,
+      "injected_primary_topic_diversity_at_k": 2,
+      "injected_target_share_at_k": 0.6,
+      "persona": "Entertainment Reader",
+      "query": "foodanddrink",
+      "target_share_delta_at_k": 0.6,
+      "target_topic_id": 4
+    },
+    {
+      "baseline_primary_topic_diversity_at_k": 1,
+      "baseline_target_share_at_k": 0.0,
+      "injected_primary_topic_diversity_at_k": 1,
+      "injected_target_share_at_k": 0.0,
+      "persona": "Finance Reader",
+      "query": "foodanddrink",
+      "target_share_delta_at_k": 0.0,
+      "target_topic_id": 4
+    }
+  ],
+  "source_fingerprint": "643c53b0ce5fddf5e08a8d6f8e491ddec607a3f56c335c44d872e6e74cbd4b52",
+  "top_k": 10
+}

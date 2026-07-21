@@ -556,6 +556,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 connection=connection,
                 query_key=query_key,
                 page_size=payload.page_size,
+                query_text=payload.query_text,
             )
             answer_ids = [answer_id for answer_id in search_candidates]
             answer_rows = load_answer_rows(connection, answer_ids)

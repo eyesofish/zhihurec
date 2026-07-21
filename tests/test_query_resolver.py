@@ -165,11 +165,44 @@ def test_resolve_uses_topic_display_name_contains_match():
     assert resolved == "888"
 
 
+# ── article headline/abstract fallback ─────────────────────────────────────
+
+
+def test_resolve_falls_back_to_real_article_text():
+    connection = FakeConnection(
+        script=[
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [{"query_key": "42", "best_score": 1.0}],
+        ]
+    )
+
+    resolved = resolve_query_key(connection, None, query_text="quarterback")
+
+    assert resolved == "42"
+    sql, params = connection._cursor.executed[-1]
+    assert "LOWER(q.display_title) LIKE %s" in sql
+    assert params == ("%quarterback%", "%quarterback%")
+
+
+def test_resolve_does_not_lexically_match_short_text():
+    connection = FakeConnection(script=[[], [], [], [], [], []])
+
+    with pytest.raises(UnresolvedQueryError):
+        resolve_query_key(connection, None, query_text="ai")
+
+    assert len(connection._cursor.executed) == 6
+
+
 # ── unresolved → 422 path ──────────────────────────────────────────────────
 
 
 def test_resolve_raises_when_nothing_matches():
-    connection = FakeConnection(script=[[], [], [], [], [], []])
+    connection = FakeConnection(script=[[], [], [], [], [], [], []])
     with pytest.raises(UnresolvedQueryError) as exc_info:
         resolve_query_key(connection, None, query_text="xyzzy-not-a-topic")
     assert exc_info.value.query_input == "xyzzy-not-a-topic"
@@ -185,6 +218,7 @@ def test_resolve_raises_when_topic_match_has_no_query_key():
             [],  # but no query_topic_map row covers it
             [],  # prefix
             [],  # contains
+            [],  # article text
         ]
     )
     with pytest.raises(UnresolvedQueryError):

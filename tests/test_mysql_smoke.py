@@ -68,12 +68,30 @@ def test_recommendation_click_increases_behavior_score(mysql_client, mysql_demo_
 
 
 def test_search_then_feed_shows_recall_candidates(mysql_client, mysql_demo_user):
+    feed_before = mysql_client.get(
+        "/feed",
+        params={"user_id": mysql_demo_user, "page_size": 1},
+    ).json()
+    article = feed_before["items"][0]
+    query_text = max(
+        (word.strip(".,:;!?()[]{}\"'") for word in article["headline"].split()),
+        key=len,
+    )
     search_resp = mysql_client.post(
         "/search",
-        json={"user_id": mysql_demo_user, "query_key": "248 12125", "page_size": 5},
+        json={
+            "user_id": mysql_demo_user,
+            "query_text": query_text,
+            "page_size": 5,
+            "debug": True,
+        },
     )
     assert search_resp.status_code == 200
     assert len(search_resp.json()["items"]) > 0
+    assert any(
+        "lexical_match" in source["source"]
+        for source in search_resp.json()["debug"]["result_sources"]
+    )
 
     feed_resp = mysql_client.get(
         "/feed",
@@ -82,7 +100,12 @@ def test_search_then_feed_shows_recall_candidates(mysql_client, mysql_demo_user)
     assert feed_resp.status_code == 200
     debug_payload = feed_resp.json()["debug"]
     sources = {c["source"] for c in debug_payload["recall_candidates"]}
-    assert sources, "expected at least one recall_candidate source"
+    assert any("recent_query_topic" in source for source in sources)
+    profile = mysql_client.get(
+        "/debug/profile",
+        params={"user_id": mysql_demo_user},
+    ).json()
+    assert profile["recent_queries"][0]["query_key"] == search_resp.json()["query_key"]
 
 
 def test_duplicate_search_event_updates_profile_once(mysql_client, mysql_demo_user):
