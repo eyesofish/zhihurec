@@ -1,4 +1,6 @@
 {
+  "status": "historical",
+  "baseline_commit": "54d4c80463fbf42da9ade7ec8b9d310d40bbd743",
   "generated_at": "2026-07-15",
   "dataset": {
     "personas": 3,

@@ -9,9 +9,11 @@ and a small sponsored-candidate lane.
 ## Current evidence
 
 The evaluation is item-impression-aware, chronological, and isolated per
-persona/request. `docs/metrics/latest.json` stores the last full 80/20 result under the
-older broad search-click heuristic; the current conservative redesign validation is in
-`docs/metrics/search_signal_validation.json`.
+persona/request. `docs/metrics/zhihurec_historical.json` stores the final ZhihuRec
+80/20 result under the older broad search-click heuristic; the conservative redesign
+validation is in `docs/metrics/search_signal_validation.json`. Both are frozen
+historical evidence during the MIND migration and will not be reused as current MIND
+metrics.
 
 - Aggregate Search Carryover Gain@10: `-0.0200` across 60 search events and three
   personas (`0.4167 -> 0.3967`). User 7248 improved, while users 1026 and 3343
@@ -120,7 +122,8 @@ and a durable training-message outbox. It is not end-to-end exactly-once.
 |---|---|
 | API and event contract | `docs/v1_api_contract.md` |
 | Current metrics and methodology | `docs/v1_metrics.md` |
-| Machine-readable evidence | `docs/metrics/latest.json` |
+| Historical ZhihuRec evidence | `docs/metrics/zhihurec_historical.json` |
+| Migration baseline | `docs/migration_baseline.md` |
 | Local operations | `docs/v1_local_runbook.md` |
 | Data analysis | `docs/data_analysis_report.md` |
 | Product/HCI walkthrough | `docs/hci_report.md` |

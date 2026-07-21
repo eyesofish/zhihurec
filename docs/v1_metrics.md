@@ -1,7 +1,11 @@
 # ZhihuRec Metrics
 
-Verified on 2026-07-15. Machine-readable values:
-`docs/metrics/latest.json`.
+Verified on 2026-07-15. Frozen historical machine-readable values:
+`docs/metrics/zhihurec_historical.json`.
+
+This document and its machine-readable evidence describe the pre-MIND ZhihuRec
+implementation. New MIND metrics must use separate files and must not overwrite this
+historical baseline.
 
 ## Evidence boundary
 
