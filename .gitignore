@@ -48,6 +48,12 @@ logs/
 /data/zhihurec_1m/raw/
 /data/zhihurec_1m/meta/tmp_download/
 
+# Public MIND data is research-licensed and remains local.
+/data/mind/raw/
+/data/mind/meta/
+/build/mind_normalized/
+/build/mind_demo_world/
+
 # Generated offline build artifacts and import packages
 /build/demo_world/
 /build/demo_fixture/

@@ -54,6 +54,23 @@ python scripts/build_demo_world.py
 python scripts/import_demo_world.py --truncate-first
 ```
 
+## MIND migration tooling
+
+The active migration uses the public Microsoft MIND dataset under the Microsoft
+Research License. The official MIND page currently routes downloads through a gated
+Hugging Face repository, so first accept its access terms and set a local `HF_TOKEN`.
+The downloader also requires an explicit license acknowledgement:
+
+```bash
+python scripts/download_mind.py --variant small --split all --accept-license
+python scripts/inspect_mind.py --variant small
+```
+
+Raw archives, extracted TSV files, local checksums, and inspection reports remain
+ignored. The inspector validates MIND IDs, timestamps, candidate labels, metadata
+coverage, missing fields, scale, train/dev overlap, and the safe ALS evaluation
+strategy before normalization begins.
+
 ## Architecture
 
 ```text
