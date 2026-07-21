@@ -17,7 +17,7 @@ def test_event_mode_defaults_to_sync_mysql():
 def test_parse_event_mode_rejects_unknown_value():
     from backend.app.config import parse_event_mode
 
-    with pytest.raises(ValueError, match="ZHIHUREC_EVENT_MODE"):
+    with pytest.raises(ValueError, match="NEWSREC_EVENT_MODE"):
         parse_event_mode("definitely_not_a_mode")
 
 

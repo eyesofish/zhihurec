@@ -5,15 +5,15 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 python_bin="${PYTHON:-python3}"
-database_url="${ZHIHUREC_DATABASE_URL:-mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo}"
-backend_port="${ZHIHUREC_BACKEND_PORT:-8000}"
-frontend_port="${ZHIHUREC_FRONTEND_PORT:-5173}"
-product_frontend_port="${ZHIHUREC_PRODUCT_FRONTEND_PORT:-5174}"
+database_url="${NEWSREC_DATABASE_URL:-${ZHIHUREC_DATABASE_URL:-mysql+pymysql://root:root@127.0.0.1:3306/newsrec_demo}}"
+backend_port="${NEWSREC_BACKEND_PORT:-${ZHIHUREC_BACKEND_PORT:-8000}}"
+frontend_port="${NEWSREC_FRONTEND_PORT:-${ZHIHUREC_FRONTEND_PORT:-5173}}"
+product_frontend_port="${NEWSREC_PRODUCT_FRONTEND_PORT:-${ZHIHUREC_PRODUCT_FRONTEND_PORT:-5174}}"
 smoke_test=0
 product_frontend=0
 with_kafka=0
 skip_frontend=0
-event_mode="${ZHIHUREC_EVENT_MODE:-kafka_dual_write}"
+event_mode="${NEWSREC_EVENT_MODE:-${ZHIHUREC_EVENT_MODE:-kafka_dual_write}}"
 runtime_dir="$repo_root/.runtime/init_local"
 declare -a started_pids=()
 
@@ -112,15 +112,16 @@ if (( with_kafka )); then
   echo "[2/6] Starting Kafka"
   docker compose -f docker-compose.kafka.yml up -d
   wait_container zhihurec-kafka
-  export ZHIHUREC_EVENT_MODE="$event_mode"
-  export ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS="${ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:9092}"
+  export NEWSREC_EVENT_MODE="$event_mode"
+  export NEWSREC_KAFKA_BOOTSTRAP_SERVERS="${NEWSREC_KAFKA_BOOTSTRAP_SERVERS:-${ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:9092}}"
 else
   echo "[2/6] Kafka disabled"
-  export ZHIHUREC_EVENT_MODE=sync_mysql
+  export NEWSREC_EVENT_MODE=sync_mysql
 fi
 
-export ZHIHUREC_DATABASE_URL="$database_url"
-export ZHIHUREC_SPONSORED_ENABLED="${ZHIHUREC_SPONSORED_ENABLED:-1}"
+export NEWSREC_DATABASE_URL="$database_url"
+export NEWSREC_DEMO_SEED_DIR="${NEWSREC_DEMO_SEED_DIR:-build/mind_demo_world}"
+export NEWSREC_SPONSORED_ENABLED="${NEWSREC_SPONSORED_ENABLED:-${ZHIHUREC_SPONSORED_ENABLED:-1}}"
 
 echo "[3/6] Applying schema and demo seed"
 "$python_bin" scripts/apply_demo_mysql.py

@@ -53,7 +53,7 @@ class ProfileEventApplier:
     ) -> None:
         self._settings = settings or get_settings()
         if not self._settings.database_url.strip():
-            raise ValueError("ZHIHUREC_DATABASE_URL is required for the profile consumer")
+            raise ValueError("NEWSREC_DATABASE_URL is required for the profile consumer")
         self._connection_config = parse_database_url(self._settings.database_url)
         self._connection_pool = MysqlConnectionPool(
             self._connection_config,

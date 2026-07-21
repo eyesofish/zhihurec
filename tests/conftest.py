@@ -55,14 +55,16 @@ def unwired_client() -> TestClient:
 
 
 def _database_url() -> str:
-    return os.environ.get("ZHIHUREC_DATABASE_URL", "").strip()
+    return (
+        os.environ.get("NEWSREC_DATABASE_URL") or os.environ.get("ZHIHUREC_DATABASE_URL", "")
+    ).strip()
 
 
 @pytest.fixture
 def mysql_demo_user() -> int:
     """Reset the configured first demo persona so mutable state is predictable."""
     if not _database_url():
-        pytest.skip("ZHIHUREC_DATABASE_URL not set")
+        pytest.skip("NEWSREC_DATABASE_URL not set")
     subprocess.run(
         [PY, str(ROOT / "scripts" / "reset_demo_user.py")],
         check=True,
@@ -85,7 +87,7 @@ def mysql_client() -> TestClient:
     Requires ZHIHUREC_DATABASE_URL to be set when the test process starts.
     """
     if not _database_url():
-        pytest.skip("ZHIHUREC_DATABASE_URL not set")
+        pytest.skip("NEWSREC_DATABASE_URL not set")
     from backend.app.config import get_settings
     from backend.app.dependencies import get_runtime_repository
     from backend.app.main import create_app

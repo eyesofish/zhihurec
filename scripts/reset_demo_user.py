@@ -3,12 +3,22 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def environment_value(name: str, legacy_name: str, default: str = "") -> str:
+    if name in os.environ:
+        return os.environ[name]
+    if legacy_name in os.environ:
+        print(f"deprecated environment variable {legacy_name}; use {name}", file=sys.stderr)
+        return os.environ[legacy_name]
+    return default
 
 
 @dataclass(frozen=True)
@@ -21,7 +31,11 @@ class MysqlUrl:
 
 
 def parse_args() -> argparse.Namespace:
-    seed_dir = os.getenv("ZHIHUREC_DEMO_SEED_DIR", "build/mind_demo_world")
+    seed_dir = environment_value(
+        "NEWSREC_DEMO_SEED_DIR",
+        "ZHIHUREC_DEMO_SEED_DIR",
+        "build/mind_demo_world",
+    )
     parser = argparse.ArgumentParser(
         description=(
             "Reset ZhihuRec demo user profiles. By default all personas in the "
@@ -55,12 +69,12 @@ def repo_path(value: str) -> Path:
 def parse_database_url(database_url: str) -> MysqlUrl:
     parsed = urlparse(database_url)
     if parsed.scheme not in {"mysql", "mysql+pymysql"}:
-        raise ValueError("ZHIHUREC_DATABASE_URL must start with mysql:// or mysql+pymysql://")
+        raise ValueError("NEWSREC_DATABASE_URL must start with mysql:// or mysql+pymysql://")
     if not parsed.hostname or not parsed.username:
-        raise ValueError("ZHIHUREC_DATABASE_URL must include host and username")
+        raise ValueError("NEWSREC_DATABASE_URL must include host and username")
     database = parsed.path.lstrip("/")
     if not database:
-        raise ValueError("ZHIHUREC_DATABASE_URL must include a database name")
+        raise ValueError("NEWSREC_DATABASE_URL must include a database name")
     return MysqlUrl(
         host=parsed.hostname,
         port=parsed.port or 3306,
@@ -258,9 +272,12 @@ def main() -> None:
     persona_seeds_path = repo_path(args.persona_seeds)
     legacy_seed_path = repo_path(args.profile_seed)
 
-    database_url = os.getenv("ZHIHUREC_DATABASE_URL", "").strip()
+    database_url = environment_value(
+        "NEWSREC_DATABASE_URL",
+        "ZHIHUREC_DATABASE_URL",
+    ).strip()
     if not database_url:
-        raise SystemExit("ZHIHUREC_DATABASE_URL is required")
+        raise SystemExit("NEWSREC_DATABASE_URL is required")
 
     config = parse_database_url(database_url)
     seeds = load_seeds(persona_seeds_path, legacy_seed_path)

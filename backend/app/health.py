@@ -47,7 +47,7 @@ def check_readiness(settings: Settings) -> HealthResponse:
     if not settings.database_configured:
         dependencies["mysql"] = DependencyHealth(
             status="error",
-            detail="ZHIHUREC_DATABASE_URL is not configured",
+            detail="NEWSREC_DATABASE_URL is not configured",
         )
         dependencies["outbox"] = DependencyHealth(
             status="disabled",

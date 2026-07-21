@@ -12,11 +12,12 @@ Usage in mysql.py scoring loop:
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 import lightgbm as lgb
+
+from backend.app.config import environment_value
 
 _MODEL: lgb.Booster | None = None
 _FEATURE_ORDER: list[str] = []
@@ -45,7 +46,7 @@ RANKER_FEATURE_COLUMNS = (
 
 def load_model(model_dir: str | None = None) -> lgb.Booster | None:
     global _MODEL, _FEATURE_ORDER, _METADATA, _MODEL_SIGNATURE
-    base = Path(model_dir or os.getenv("ZHIHUREC_MODEL_DIR") or "build")
+    base = Path(model_dir or environment_value("NEWSREC_MODEL_DIR") or "build")
     model_path = base / "lgb_ranker_v1.txt"
     meta_path = base / "lgb_ranker_v1_meta.json"
 

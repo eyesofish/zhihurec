@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        summary="ZhihuRec recommendation-serving and event-pipeline prototype",
+        summary="News recommendation serving and event-pipeline prototype",
         lifespan=lifespan,
     )
 

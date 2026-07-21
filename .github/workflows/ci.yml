@@ -47,7 +47,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: zhihurec_demo
+          MYSQL_DATABASE: newsrec_demo
         ports:
           - 3306:3306
         options: >-
@@ -56,9 +56,9 @@ jobs:
           --health-timeout 5s
           --health-retries 30
     env:
-      ZHIHUREC_DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo
-      ZHIHUREC_EVENT_MODE: sync_mysql
-      ZHIHUREC_SPONSORED_ENABLED: "1"
+      NEWSREC_DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/newsrec_demo
+      NEWSREC_EVENT_MODE: sync_mysql
+      NEWSREC_SPONSORED_ENABLED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -79,7 +79,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: zhihurec_demo
+          MYSQL_DATABASE: newsrec_demo
         ports:
           - 3306:3306
         options: >-
@@ -88,10 +88,10 @@ jobs:
           --health-timeout 5s
           --health-retries 30
     env:
-      ZHIHUREC_DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/zhihurec_demo
-      ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS: 127.0.0.1:9092
-      ZHIHUREC_EVENT_MODE: kafka_async
-      ZHIHUREC_SPONSORED_ENABLED: "1"
+      NEWSREC_DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/newsrec_demo
+      NEWSREC_KAFKA_BOOTSTRAP_SERVERS: 127.0.0.1:9092
+      NEWSREC_EVENT_MODE: kafka_async
+      NEWSREC_SPONSORED_ENABLED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

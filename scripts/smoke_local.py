@@ -17,9 +17,9 @@ sys.path.insert(0, str(ROOT))
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Verify a running ZhihuRec local stack.")
+    parser = argparse.ArgumentParser(description="Verify a running NewsIntentRec local stack.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
-    parser.add_argument("--user-id", type=int, default=7248)
+    parser.add_argument("--user-id", type=int)
     parser.add_argument("--timeout-seconds", type=int, default=60)
     return parser.parse_args()
 
@@ -87,15 +87,19 @@ def pipeline_state(event_id: str, raw_topic: str, training_topic: str) -> dict[s
 
 def main() -> None:
     args = parse_args()
+    from backend.app.config import get_settings
+
+    settings = get_settings()
+    user_id = args.user_id or settings.default_demo_user_id
     readiness = wait_for_readiness(args.base_url, args.timeout_seconds)
     if readiness.get("status") != "ok":
         raise SystemExit(f"readiness failed: {readiness}")
 
-    profile = get_json(args.base_url, "/debug/profile", user_id=args.user_id)
+    profile = get_json(args.base_url, "/debug/profile", user_id=user_id)
     feed = get_json(
         args.base_url,
         "/feed",
-        user_id=args.user_id,
+        user_id=user_id,
         page_size=10,
         debug="true",
     )
@@ -105,13 +109,13 @@ def main() -> None:
         (item for item in feed["items"] if item.get("content_type") == "organic"),
         feed["items"][0],
     )
-    event_id = f"smoke-click-{args.user_id}-{feed['request_id']}-{first['answer_id']}"
+    event_id = f"smoke-click-{user_id}-{feed['request_id']}-{first['answer_id']}"
     event = post_json(
         args.base_url,
         "/event/track",
         {
             "event_id": event_id,
-            "user_id": args.user_id,
+            "user_id": user_id,
             "event_type": "recommendation_click",
             "surface": "feed",
             "answer_id": first["answer_id"],
@@ -126,21 +130,19 @@ def main() -> None:
     final_profile = profile
     state: dict[str, Any] = {}
     while time.monotonic() < deadline:
-        final_profile = get_json(args.base_url, "/debug/profile", user_id=args.user_id)
+        final_profile = get_json(args.base_url, "/debug/profile", user_id=user_id)
         state = pipeline_state(
             event_id,
-            raw_topic="zhihurec.events.raw",
-            training_topic="zhihurec.training.interactions",
+            raw_topic=settings.kafka_raw_events_topic,
+            training_topic=settings.kafka_training_topic,
         )
         profile_applied = float(final_profile["behavior_score"]) > baseline_score
         if readiness["event_mode"] == "sync_mysql":
             if profile_applied and state["event_count"] == 1:
                 break
         else:
-            raw_published = state["outbox"].get("zhihurec.events.raw") == "published"
-            training_published = (
-                state["outbox"].get("zhihurec.training.interactions") == "published"
-            )
+            raw_published = state["outbox"].get(settings.kafka_raw_events_topic) == "published"
+            training_published = state["outbox"].get(settings.kafka_training_topic) == "published"
             if (
                 profile_applied
                 and state["event_count"] == 1

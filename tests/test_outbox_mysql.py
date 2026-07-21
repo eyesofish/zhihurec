@@ -17,15 +17,19 @@ from backend.app.schemas.event_track import EventTrackRequest
 pytestmark = [
     pytest.mark.mysql,
     pytest.mark.skipif(
-        not os.environ.get("ZHIHUREC_DATABASE_URL", "").strip(),
-        reason="ZHIHUREC_DATABASE_URL not set",
+        not (
+            os.environ.get("NEWSREC_DATABASE_URL") or os.environ.get("ZHIHUREC_DATABASE_URL", "")
+        ).strip(),
+        reason="NEWSREC_DATABASE_URL not set",
     ),
 ]
 
 
 def _settings(event_mode: str) -> Settings:
     return Settings(
-        database_url=os.environ["ZHIHUREC_DATABASE_URL"],
+        database_url=(
+            os.environ.get("NEWSREC_DATABASE_URL") or os.environ["ZHIHUREC_DATABASE_URL"]
+        ),
         event_mode=event_mode,  # type: ignore[arg-type]
         outbox_poll_interval_seconds=0.01,
     )

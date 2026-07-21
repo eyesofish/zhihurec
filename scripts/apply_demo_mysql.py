@@ -11,6 +11,15 @@ from urllib.parse import unquote, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def environment_value(name: str, legacy_name: str, default: str = "") -> str:
+    if name in os.environ:
+        return os.environ[name]
+    if legacy_name in os.environ:
+        print(f"deprecated environment variable {legacy_name}; use {name}", file=sys.stderr)
+        return os.environ[legacy_name]
+    return default
+
+
 @dataclass(frozen=True)
 class MysqlUrl:
     host: str
@@ -21,7 +30,11 @@ class MysqlUrl:
 
 
 def parse_args() -> argparse.Namespace:
-    seed_dir = os.getenv("ZHIHUREC_DEMO_SEED_DIR", "build/mind_demo_world")
+    seed_dir = environment_value(
+        "NEWSREC_DEMO_SEED_DIR",
+        "ZHIHUREC_DEMO_SEED_DIR",
+        "build/mind_demo_world",
+    )
     parser = argparse.ArgumentParser(
         description="Apply ZhihuRec V1 schema and demo seed SQL to MySQL."
     )
@@ -50,14 +63,14 @@ def repo_path(value: str) -> Path:
 def parse_database_url(database_url: str) -> MysqlUrl:
     parsed = urlparse(database_url)
     if parsed.scheme not in {"mysql", "mysql+pymysql"}:
-        raise ValueError("ZHIHUREC_DATABASE_URL must start with mysql:// or mysql+pymysql://")
+        raise ValueError("NEWSREC_DATABASE_URL must start with mysql:// or mysql+pymysql://")
     if not parsed.hostname:
-        raise ValueError("ZHIHUREC_DATABASE_URL must include a host")
+        raise ValueError("NEWSREC_DATABASE_URL must include a host")
     if not parsed.username:
-        raise ValueError("ZHIHUREC_DATABASE_URL must include a username")
+        raise ValueError("NEWSREC_DATABASE_URL must include a username")
     database = parsed.path.lstrip("/")
     if not database:
-        raise ValueError("ZHIHUREC_DATABASE_URL must include a database name")
+        raise ValueError("NEWSREC_DATABASE_URL must include a database name")
     return MysqlUrl(
         host=parsed.hostname,
         port=parsed.port or 3306,
@@ -173,7 +186,10 @@ def main() -> None:
             print(f"missing: {path}")
         raise SystemExit(1)
 
-    database_url = os.getenv("ZHIHUREC_DATABASE_URL", "").strip()
+    database_url = environment_value(
+        "NEWSREC_DATABASE_URL",
+        "ZHIHUREC_DATABASE_URL",
+    ).strip()
     config = parse_database_url(database_url) if database_url else None
 
     if args.dry_run:
@@ -187,7 +203,7 @@ def main() -> None:
         return
 
     if config is None:
-        raise SystemExit("ZHIHUREC_DATABASE_URL is required unless --dry-run is used")
+        raise SystemExit("NEWSREC_DATABASE_URL is required unless --dry-run is used")
 
     connection = connect(config)
     try:

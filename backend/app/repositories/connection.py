@@ -19,15 +19,15 @@ class MysqlConnectionConfig:
 def parse_database_url(database_url: str) -> MysqlConnectionConfig:
     parsed = urlparse(database_url)
     if parsed.scheme not in {"mysql", "mysql+pymysql"}:
-        raise ValueError("ZHIHUREC_DATABASE_URL must start with mysql:// or mysql+pymysql://")
+        raise ValueError("NEWSREC_DATABASE_URL must start with mysql:// or mysql+pymysql://")
     if not parsed.hostname:
-        raise ValueError("ZHIHUREC_DATABASE_URL must include a host")
+        raise ValueError("NEWSREC_DATABASE_URL must include a host")
     if not parsed.username:
-        raise ValueError("ZHIHUREC_DATABASE_URL must include a username")
+        raise ValueError("NEWSREC_DATABASE_URL must include a username")
 
     database = parsed.path.lstrip("/")
     if not database:
-        raise ValueError("ZHIHUREC_DATABASE_URL must include a database name")
+        raise ValueError("NEWSREC_DATABASE_URL must include a database name")
 
     return MysqlConnectionConfig(
         host=parsed.hostname,

@@ -1,4 +1,4 @@
-<# One-shot local bootstrap for the ZhihuRec V1 demo environment. #>
+<# One-shot local bootstrap for the NewsIntentRec demo environment. #>
 [CmdletBinding()]
 param(
     [string]$Python = 'C:\ProgramData\anaconda3\python.exe',
@@ -19,6 +19,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $PSBoundParameters.ContainsKey('DatabaseUrl')) {
+    $DatabaseUrl = 'mysql+pymysql://root:root@localhost:3306/newsrec_demo'
+}
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $runtimeDir = Join-Path $repoRoot '.runtime\init_local'
@@ -212,15 +215,16 @@ if ($WithKafka) {
         -Arguments @('compose', '-f', 'docker-compose.kafka.yml', 'up', '-d') `
         -Label 'docker compose kafka up'
     Wait-KafkaHealthy -TimeoutSeconds $MysqlHealthTimeoutSeconds
-    $env:ZHIHUREC_EVENT_MODE = $EventMode
-    $env:ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS = '127.0.0.1:9092'
+    $env:NEWSREC_EVENT_MODE = $EventMode
+    $env:NEWSREC_KAFKA_BOOTSTRAP_SERVERS = '127.0.0.1:9092'
 } else {
-    $env:ZHIHUREC_EVENT_MODE = 'sync_mysql'
+    $env:NEWSREC_EVENT_MODE = 'sync_mysql'
 }
 
-Write-Step '[3/6] Setting ZHIHUREC_DATABASE_URL for child processes'
-$env:ZHIHUREC_DATABASE_URL = $DatabaseUrl
-$env:ZHIHUREC_SPONSORED_ENABLED = '1'
+Write-Step '[3/6] Setting NEWSREC_DATABASE_URL for child processes'
+$env:NEWSREC_DATABASE_URL = $DatabaseUrl
+$env:NEWSREC_DEMO_SEED_DIR = 'build/mind_demo_world'
+$env:NEWSREC_SPONSORED_ENABLED = '1'
 
 Write-Step '[4/6] Applying schema and demo seed'
 Invoke-External -FilePath $Python -Arguments @('scripts\apply_demo_mysql.py') -Label 'apply_demo_mysql.py'

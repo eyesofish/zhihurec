@@ -7,16 +7,16 @@ import pytest
 pytestmark = [
     pytest.mark.mysql,
     pytest.mark.skipif(
-        not os.environ.get("ZHIHUREC_DATABASE_URL", "").strip(),
-        reason="ZHIHUREC_DATABASE_URL not set; run scripts/init_local.ps1 -SmokeTest first.",
+        not (
+            os.environ.get("NEWSREC_DATABASE_URL") or os.environ.get("ZHIHUREC_DATABASE_URL", "")
+        ).strip(),
+        reason="NEWSREC_DATABASE_URL not set; run scripts/init_local.ps1 -SmokeTest first.",
     ),
 ]
 
 
 def test_answer_card_returns_payload_for_feed_answer(mysql_client, mysql_demo_user):
-    feed = mysql_client.get(
-        "/feed", params={"user_id": mysql_demo_user, "page_size": 1}
-    ).json()
+    feed = mysql_client.get("/feed", params={"user_id": mysql_demo_user, "page_size": 1}).json()
     answer_id = feed["items"][0]["answer_id"]
 
     r = mysql_client.get(f"/answers/{answer_id}")

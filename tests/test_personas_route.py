@@ -7,8 +7,10 @@ import pytest
 pytestmark = [
     pytest.mark.mysql,
     pytest.mark.skipif(
-        not os.environ.get("ZHIHUREC_DATABASE_URL", "").strip(),
-        reason="ZHIHUREC_DATABASE_URL not set; run scripts/init_local.ps1 -SmokeTest first.",
+        not (
+            os.environ.get("NEWSREC_DATABASE_URL") or os.environ.get("ZHIHUREC_DATABASE_URL", "")
+        ).strip(),
+        reason="NEWSREC_DATABASE_URL not set; run scripts/init_local.ps1 -SmokeTest first.",
     ),
 ]
 

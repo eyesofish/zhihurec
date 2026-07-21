@@ -228,7 +228,7 @@ class OutboxPublisherWorker:
     ) -> None:
         self._settings = settings or get_settings()
         if not self._settings.database_url.strip():
-            raise ValueError("ZHIHUREC_DATABASE_URL is required for the outbox publisher")
+            raise ValueError("NEWSREC_DATABASE_URL is required for the outbox publisher")
         if not self._settings.kafka_enabled:
             raise ValueError("outbox publisher requires kafka_dual_write or kafka_async mode")
         config = parse_database_url(self._settings.database_url)

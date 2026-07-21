@@ -112,7 +112,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
         settings: Settings,
     ) -> None:
         if not settings.database_url.strip():
-            raise ValueError("ZHIHUREC_DATABASE_URL is required for MysqlRuntimeRepository")
+            raise ValueError("NEWSREC_DATABASE_URL is required for MysqlRuntimeRepository")
         self._settings = settings
         self._connection_config = parse_database_url(settings.database_url)
         self._connection_pool = MysqlConnectionPool(
@@ -518,9 +518,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
     def search(self, payload: SearchRequest) -> SearchResponse:
         event_ts = (
-            payload.replay_event_ts
-            if payload.replay_event_ts is not None
-            else int(time.time())
+            payload.replay_event_ts if payload.replay_event_ts is not None else int(time.time())
         )
         connection = self._connection_pool.connect()
         try:
@@ -636,9 +634,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
     def record_recommendation_click(self, payload: RecommendationClickRequest) -> EventAckResponse:
         event_ts = (
-            payload.replay_event_ts
-            if payload.replay_event_ts is not None
-            else int(time.time())
+            payload.replay_event_ts if payload.replay_event_ts is not None else int(time.time())
         )
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
@@ -746,9 +742,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
     def record_search_result_click(self, payload: SearchResultClickRequest) -> EventAckResponse:
         query_key = normalize_query_key(payload.query_key)
         event_ts = (
-            payload.replay_event_ts
-            if payload.replay_event_ts is not None
-            else int(time.time())
+            payload.replay_event_ts if payload.replay_event_ts is not None else int(time.time())
         )
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
@@ -1034,9 +1028,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
             # Apply the same positive profile update as a recommendation click,
             # but stamp the user_event row with event_type='upvote' for analytics distinction.
             event_ts = (
-                payload.replay_event_ts
-                if payload.replay_event_ts is not None
-                else int(time.time())
+                payload.replay_event_ts if payload.replay_event_ts is not None else int(time.time())
             )
             sponsored_attribution = self._load_sponsored_event_attribution(
                 delivery_id=payload.sponsored_delivery_id,
@@ -1145,9 +1137,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
 
         # Log-only events: feed_impression, detail_view, dwell, downvote, share
         event_ts = (
-            payload.replay_event_ts
-            if payload.replay_event_ts is not None
-            else int(time.time())
+            payload.replay_event_ts if payload.replay_event_ts is not None else int(time.time())
         )
         if payload.answer_id is None:
             raise ValueError(f"{payload.event_type} requires answer_id")
