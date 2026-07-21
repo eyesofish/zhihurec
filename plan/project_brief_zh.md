@@ -1,3 +1,9 @@
+# Superseded
+
+本文档保留为最初 ZhihuRec 项目边界的历史记录。当前项目已迁移为使用公开 MIND
+数据集的个人英文新闻推荐系统 NewsIntentRec；当前运行方式、API 和指标以根目录
+`README.md`、`docs/` 和 `plan/mind_migration_plan_zh.md` 为准。
+
 # 项目简报：基于 ZhihuRec 的搜索-推荐闭环系统
 
 ## 0. 核心目标

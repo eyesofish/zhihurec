@@ -1,0 +1,67 @@
+{
+  "content": {
+    "categories": 18,
+    "empty_abstract_ratio": 0.052347,
+    "subcategories": 270,
+    "top_categories": {
+      "autos": 2076,
+      "finance": 3786,
+      "foodanddrink": 3123,
+      "health": 2207,
+      "lifestyle": 2991,
+      "news": 20039,
+      "sports": 19368,
+      "travel": 3013,
+      "video": 2712,
+      "weather": 2601
+    },
+    "unique_articles": 65238
+  },
+  "dataset": "MIND-small",
+  "demo_world": {
+    "articles": 174,
+    "difference_from_full_data": "The demo world is a deterministic serving slice and is not model evidence.",
+    "personas": 3,
+    "requests": 15
+  },
+  "exposure": {
+    "article_count_with_train_exposure": 20288,
+    "ctr_quantiles": {
+      "0.0": 0.0,
+      "0.25": 0.0,
+      "0.5": 0.0,
+      "0.75": 0.03342,
+      "0.95": 0.214286,
+      "1.0": 1.0
+    },
+    "top_10_percent_exposure_share": 0.905368,
+    "top_1_percent_exposure_share": 0.325159
+  },
+  "normalized_fingerprint": "643c53b0ce5fddf5e08a8d6f8e491ddec607a3f56c335c44d872e6e74cbd4b52",
+  "overlap_and_cold_start": {
+    "dev_cold_article_ratio": 0.46247,
+    "dev_known_user_ratio": 0.11886,
+    "train_dev_article_overlap": 2886,
+    "train_dev_user_overlap": 5943
+  },
+  "splits": {
+    "dev": {
+      "candidates": 2740998,
+      "mean_candidates_per_request": 37.469898,
+      "mean_positives_per_request": 1.522624,
+      "median_history_length": 19,
+      "positives": 111383,
+      "requests": 73152,
+      "users": 50000
+    },
+    "train": {
+      "candidates": 5843444,
+      "mean_candidates_per_request": 37.227688,
+      "mean_positives_per_request": 1.505711,
+      "median_history_length": 19,
+      "positives": 236344,
+      "requests": 156965,
+      "users": 50000
+    }
+  }
+}

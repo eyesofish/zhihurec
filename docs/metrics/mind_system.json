@@ -1,0 +1,15 @@
+{
+  "environment": "local macOS, FastAPI + MySQL, loopback HTTP",
+  "feed": {
+    "iterations": 30,
+    "p50_ms": 9.467,
+    "p95_ms": 14.177
+  },
+  "limitations": "Local demo latency only; not a production capacity or tail-latency claim.",
+  "search": {
+    "iterations": 30,
+    "p50_ms": 6.013,
+    "p95_ms": 7.867
+  },
+  "user_id": 72148
+}
