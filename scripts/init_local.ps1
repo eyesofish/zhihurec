@@ -2,15 +2,13 @@
 [CmdletBinding()]
 param(
     [string]$Python = 'C:\ProgramData\anaconda3\python.exe',
-    [string]$DatabaseUrl = 'mysql+pymysql://root:root@localhost:3306/zhihurec_demo',
+    [string]$DatabaseUrl = 'mysql+pymysql://root:root@localhost:3306/newsrec_demo',
     [int]$BackendPort = 8000,
-    [int]$FrontendPort = 5173,
     [int]$ProductFrontendPort = 5174,
     [int]$MysqlHealthTimeoutSeconds = 120,
     [int]$ConsumerMetricsPort = 9101,
     [int]$OutboxMetricsPort = 9102,
     [switch]$SkipBackend,
-    [switch]$SkipFrontend,
     [switch]$ProductFrontend,
     [switch]$WithKafka,
     [ValidateSet('kafka_dual_write', 'kafka_async')]
@@ -56,7 +54,7 @@ function Wait-MysqlHealthy {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $status = (& docker inspect -f '{{.State.Health.Status}}' zhihurec-mysql 2>$null)
+        $status = (& docker inspect -f '{{.State.Health.Status}}' newsrec-mysql 2>$null)
         if ($LASTEXITCODE -ne 0) {
             $status = ''
         }
@@ -76,7 +74,7 @@ function Wait-KafkaHealthy {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $status = (& docker inspect -f '{{.State.Health.Status}}' zhihurec-kafka 2>$null)
+        $status = (& docker inspect -f '{{.State.Health.Status}}' newsrec-kafka 2>$null)
         if ($LASTEXITCODE -ne 0) {
             $status = ''
         }
@@ -252,13 +250,6 @@ try {
             -Port $ConsumerMetricsPort
     }
 
-    if (-not $SkipFrontend) {
-        Start-LocalService `
-            -Name 'frontend' `
-            -Arguments @('-m', 'http.server', "$FrontendPort", '-d', 'frontend') `
-            -Port $FrontendPort
-    }
-
     if ($ProductFrontend) {
         $pfDir = Join-Path $repoRoot 'product-frontend'
         if (-not (Test-Path (Join-Path $pfDir 'node_modules'))) {
@@ -311,16 +302,10 @@ try {
     if (-not $SkipBackend) {
         $health = Wait-JsonEndpoint -Name 'Backend health' -Url "http://127.0.0.1:$BackendPort/healthz"
         Write-Host "  repository_backend=$($health.repository_backend)"
-        Wait-JsonEndpoint -Name 'Debug profile' -Url "http://127.0.0.1:$BackendPort/debug/profile?user_id=7248" | Out-Null
-        Wait-JsonEndpoint -Name 'Debug feed' -Url "http://127.0.0.1:$BackendPort/feed?user_id=7248&page_size=10&debug=true" | Out-Null
         Invoke-External `
             -FilePath $Python `
             -Arguments @('scripts\smoke_local.py', '--base-url', "http://127.0.0.1:$BackendPort") `
             -Label 'smoke_local.py'
-    }
-
-    if (-not $SkipFrontend) {
-        Wait-HttpEndpoint -Name 'Frontend' -Url "http://127.0.0.1:$FrontendPort/"
     }
 
     if ($ProductFrontend) {
@@ -331,9 +316,6 @@ try {
     Write-Host 'Ready.' -ForegroundColor Green
     if (-not $SkipBackend) {
         Write-Host "  Backend:          http://127.0.0.1:$BackendPort"
-    }
-    if (-not $SkipFrontend) {
-        Write-Host "  Debug frontend:   http://127.0.0.1:$FrontendPort"
     }
     if ($ProductFrontend) {
         Write-Host "  Product frontend: http://127.0.0.1:$ProductFrontendPort"

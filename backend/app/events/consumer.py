@@ -172,7 +172,7 @@ class ProfileEventApplier:
                 connection,
                 delivery_id=event.sponsored_delivery_id,
                 user_id=event.user_id,
-                answer_id=event.article_id,
+                article_id=event.article_id,
                 for_update=True,
             )
             if event.sponsored_delivery_id
@@ -194,7 +194,7 @@ class ProfileEventApplier:
             connection=connection,
             user_id=event.user_id,
             event_type="search_result_click",
-            answer_id=event.article_id,
+            article_id=event.article_id,
             query_key=event.query_key,
             request_id=event.request_id,
             surface=event.surface or "search",
@@ -221,7 +221,7 @@ class ProfileEventApplier:
         apply_click_profile_update(
             connection=connection,
             profile_row=profile_row,
-            answer_id=event.article_id,
+            article_id=event.article_id,
             event_ts=event.event_ts,
             topic_deltas=topic_deltas,
             behavior_delta=self._settings.search_result_click_behavior_delta,
@@ -246,7 +246,7 @@ class ProfileEventApplier:
                 connection,
                 delivery_id=event.sponsored_delivery_id,
                 user_id=event.user_id,
-                answer_id=event.article_id,
+                article_id=event.article_id,
                 for_update=True,
             )
             if event.sponsored_delivery_id
@@ -258,7 +258,7 @@ class ProfileEventApplier:
             connection=connection,
             user_id=event.user_id,
             event_type=event_type,
-            answer_id=event.article_id,
+            article_id=event.article_id,
             query_key=event.query_key,
             request_id=event.request_id,
             surface=surface,
@@ -279,7 +279,7 @@ class ProfileEventApplier:
         apply_click_profile_update(
             connection=connection,
             profile_row=profile_row,
-            answer_id=event.article_id,
+            article_id=event.article_id,
             event_ts=event.event_ts,
             topic_deltas=topic_deltas,
             behavior_delta=behavior_delta,
@@ -292,7 +292,7 @@ class ProfileEventApplier:
                 connection,
                 delivery_id=event.sponsored_delivery_id,
                 user_id=event.user_id,
-                answer_id=int(event.article_id),
+                article_id=int(event.article_id),
                 for_update=True,
             )
             if event.sponsored_delivery_id and event.article_id is not None
@@ -303,7 +303,7 @@ class ProfileEventApplier:
             user_id=event.user_id,
             event_type=event.event_type,
             surface=event.surface or "home_feed",
-            answer_id=event.article_id,
+            article_id=event.article_id,
             query_key=event.query_key,
             request_id=event.request_id,
             event_ts=event.event_ts,

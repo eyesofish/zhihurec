@@ -78,5 +78,5 @@ def test_updated_topic_weights_caps_at_ten_entries_sorted_desc():
 
 
 def test_request_ids_are_collision_resistant():
-    request_ids = {new_request_id("zhihurec", "feed") for _ in range(1000)}
+    request_ids = {new_request_id("newsrec", "feed") for _ in range(1000)}
     assert len(request_ids) == 1000

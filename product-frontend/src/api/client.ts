@@ -11,7 +11,6 @@ import type {
 
 const BASE_URL: string =
   (import.meta.env.VITE_NEWSREC_API_BASE as string | undefined)?.trim() ||
-  (import.meta.env.VITE_ZHIHUREC_API_BASE as string | undefined)?.trim() ||
   "http://127.0.0.1:8000";
 
 export function newClientId(prefix: string): string {

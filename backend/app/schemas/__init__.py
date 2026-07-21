@@ -1,1 +1,1 @@
-"""Pydantic schemas for the ZhihuRec backend."""
+"""Pydantic schemas for the NewsIntentRec backend."""

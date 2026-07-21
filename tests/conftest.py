@@ -17,7 +17,7 @@ PY = sys.executable
 def unwired_client() -> TestClient:
     """TestClient forced onto UnwiredRuntimeRepository.
 
-    Bypasses any ZHIHUREC_DATABASE_URL set in the developer's shell so the test
+    Bypasses any configured database URL so the test
     is hermetic regardless of environment.
     """
     from backend.app.config import Settings, get_settings
@@ -55,9 +55,7 @@ def unwired_client() -> TestClient:
 
 
 def _database_url() -> str:
-    return (
-        os.environ.get("NEWSREC_DATABASE_URL") or os.environ.get("ZHIHUREC_DATABASE_URL", "")
-    ).strip()
+    return os.environ.get("NEWSREC_DATABASE_URL", "").strip()
 
 
 @pytest.fixture
@@ -70,7 +68,7 @@ def mysql_demo_user() -> int:
         check=True,
         cwd=ROOT,
     )
-    seed_dir = Path(os.environ.get("ZHIHUREC_DEMO_SEED_DIR", "build/mind_demo_world"))
+    seed_dir = Path(os.environ.get("NEWSREC_DEMO_SEED_DIR", "build/mind_demo_world"))
     if not seed_dir.is_absolute():
         seed_dir = ROOT / seed_dir
     seed_path = seed_dir / "demo_user_profile_seed.json"
@@ -84,7 +82,7 @@ def mysql_demo_user() -> int:
 def mysql_client() -> TestClient:
     """TestClient backed by the real MysqlRuntimeRepository.
 
-    Requires ZHIHUREC_DATABASE_URL to be set when the test process starts.
+    Requires NEWSREC_DATABASE_URL to be set when the test process starts.
     """
     if not _database_url():
         pytest.skip("NEWSREC_DATABASE_URL not set")

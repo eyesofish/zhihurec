@@ -5,14 +5,21 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 python_bin="${PYTHON:-python3}"
+if [[ -z "${NEWSREC_DATABASE_URL:-}" && -n "${ZHIHUREC_DATABASE_URL:-}" ]]; then
+  echo "deprecated environment variable ZHIHUREC_DATABASE_URL; use NEWSREC_DATABASE_URL" >&2
+fi
+if [[ -z "${NEWSREC_EVENT_MODE:-}" && -n "${ZHIHUREC_EVENT_MODE:-}" ]]; then
+  echo "deprecated environment variable ZHIHUREC_EVENT_MODE; use NEWSREC_EVENT_MODE" >&2
+fi
+if [[ -z "${NEWSREC_KAFKA_BOOTSTRAP_SERVERS:-}" && -n "${ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
+  echo "deprecated environment variable ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS; use NEWSREC_KAFKA_BOOTSTRAP_SERVERS" >&2
+fi
 database_url="${NEWSREC_DATABASE_URL:-${ZHIHUREC_DATABASE_URL:-mysql+pymysql://root:root@127.0.0.1:3306/newsrec_demo}}"
 backend_port="${NEWSREC_BACKEND_PORT:-${ZHIHUREC_BACKEND_PORT:-8000}}"
-frontend_port="${NEWSREC_FRONTEND_PORT:-${ZHIHUREC_FRONTEND_PORT:-5173}}"
 product_frontend_port="${NEWSREC_PRODUCT_FRONTEND_PORT:-${ZHIHUREC_PRODUCT_FRONTEND_PORT:-5174}}"
 smoke_test=0
 product_frontend=0
 with_kafka=0
-skip_frontend=0
 event_mode="${NEWSREC_EVENT_MODE:-${ZHIHUREC_EVENT_MODE:-kafka_dual_write}}"
 runtime_dir="$repo_root/.runtime/init_local"
 declare -a started_pids=()
@@ -24,7 +31,6 @@ Usage: scripts/init_local.sh [options]
   --product-frontend    Start the React/Vite frontend.
   --with-kafka          Start Kafka, profile consumer, and outbox publisher.
   --event-mode MODE     kafka_dual_write or kafka_async (default dual write).
-  --skip-frontend       Do not start the static debug frontend.
 EOF
 }
 
@@ -33,7 +39,6 @@ while [[ $# -gt 0 ]]; do
     --smoke-test) smoke_test=1 ;;
     --product-frontend) product_frontend=1 ;;
     --with-kafka) with_kafka=1 ;;
-    --skip-frontend) skip_frontend=1 ;;
     --event-mode)
       shift
       event_mode="${1:?--event-mode requires a value}"
@@ -106,12 +111,12 @@ docker compose version >/dev/null
 
 echo "[1/6] Starting MySQL"
 docker compose up -d
-wait_container zhihurec-mysql
+wait_container newsrec-mysql
 
 if (( with_kafka )); then
   echo "[2/6] Starting Kafka"
   docker compose -f docker-compose.kafka.yml up -d
-  wait_container zhihurec-kafka
+  wait_container newsrec-kafka
   export NEWSREC_EVENT_MODE="$event_mode"
   export NEWSREC_KAFKA_BOOTSTRAP_SERVERS="${NEWSREC_KAFKA_BOOTSTRAP_SERVERS:-${ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:9092}}"
 else
@@ -135,10 +140,7 @@ if (( with_kafka )); then
   start_service consumer "$python_bin" scripts/run_profile_consumer.py
 fi
 
-echo "[5/6] Starting frontends"
-if (( ! skip_frontend )); then
-  start_service frontend "$python_bin" -m http.server "$frontend_port" -d frontend
-fi
+echo "[5/6] Starting product frontend"
 if (( product_frontend )); then
   require_command npm
   if [[ ! -d product-frontend/node_modules ]]; then

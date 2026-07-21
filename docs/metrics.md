@@ -36,5 +36,4 @@ Local loopback measurements over 30 requests:
 | Feed | 9.47 ms | 14.18 ms |
 | Search | 6.01 ms | 7.87 ms |
 
-Historical ZhihuRec evidence remains only in
-`docs/metrics/zhihurec_historical.json` for migration traceability and is not current.
+Historical pre-migration metrics remain available in Git history and are not current.

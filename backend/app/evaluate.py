@@ -69,7 +69,7 @@ def recall_at_k(predicted: Sequence[int], relevant: Iterable[int], k: int) -> fl
     """|relevant intersect predicted[:k]| / |relevant|.
 
     Returns 0.0 when k <= 0 or `relevant` is empty. For single-relevant-per-query
-    evaluation callers should pass `relevant=[answer_id]`; the returned value is
+    evaluation callers should pass `relevant=[article_id]`; the returned value is
     then 1.0 if hit, 0.0 otherwise, and per-query averages give Hit Rate @K.
     """
     if k <= 0:

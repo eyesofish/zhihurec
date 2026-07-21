@@ -1,1 +1,1 @@
-"""API routers for the ZhihuRec backend."""
+"""API routers for the NewsIntentRec backend."""

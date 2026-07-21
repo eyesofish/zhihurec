@@ -19,16 +19,11 @@ pytestmark = [
     pytest.mark.mysql,
     pytest.mark.kafka,
     pytest.mark.skipif(
-        not (
-            os.environ.get("NEWSREC_DATABASE_URL") or os.environ.get("ZHIHUREC_DATABASE_URL", "")
-        ).strip(),
+        not os.environ.get("NEWSREC_DATABASE_URL", "").strip(),
         reason="NEWSREC_DATABASE_URL not set",
     ),
     pytest.mark.skipif(
-        not (
-            os.environ.get("NEWSREC_KAFKA_BOOTSTRAP_SERVERS")
-            or os.environ.get("ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS", "")
-        ).strip(),
+        not os.environ.get("NEWSREC_KAFKA_BOOTSTRAP_SERVERS", "").strip(),
         reason="NEWSREC_KAFKA_BOOTSTRAP_SERVERS not set",
     ),
 ]
@@ -42,10 +37,7 @@ def test_raw_event_reaches_mysql_and_training_topic(mysql_client, mysql_demo_use
     raw_topic = f"newsrec.test.raw.{suffix}"
     training_topic = f"newsrec.test.training.{suffix}"
     dlq_topic = f"newsrec.test.dlq.{suffix}"
-    bootstrap = (
-        os.environ.get("NEWSREC_KAFKA_BOOTSTRAP_SERVERS")
-        or os.environ["ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS"]
-    )
+    bootstrap = os.environ["NEWSREC_KAFKA_BOOTSTRAP_SERVERS"]
     admin = AdminClient({"bootstrap.servers": bootstrap})
     futures = admin.create_topics(
         [
@@ -58,9 +50,7 @@ def test_raw_event_reaches_mysql_and_training_topic(mysql_client, mysql_demo_use
         future.result(timeout=20)
 
     settings = Settings(
-        database_url=(
-            os.environ.get("NEWSREC_DATABASE_URL") or os.environ["ZHIHUREC_DATABASE_URL"]
-        ),
+        database_url=os.environ["NEWSREC_DATABASE_URL"],
         event_mode="kafka_async",
         kafka_bootstrap_servers=bootstrap,
         kafka_profile_group_id=f"newsrec-test-profile-{suffix}",
@@ -140,13 +130,10 @@ def test_invalid_raw_event_reaches_dlq():
     from confluent_kafka.admin import AdminClient, NewTopic
 
     suffix = uuid.uuid4().hex[:10]
-    raw_topic = f"zhihurec.test.raw.{suffix}"
-    training_topic = f"zhihurec.test.training.{suffix}"
-    dlq_topic = f"zhihurec.test.dlq.{suffix}"
-    bootstrap = (
-        os.environ.get("NEWSREC_KAFKA_BOOTSTRAP_SERVERS")
-        or os.environ["ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS"]
-    )
+    raw_topic = f"newsrec.test.raw.{suffix}"
+    training_topic = f"newsrec.test.training.{suffix}"
+    dlq_topic = f"newsrec.test.dlq.{suffix}"
+    bootstrap = os.environ["NEWSREC_KAFKA_BOOTSTRAP_SERVERS"]
     admin = AdminClient({"bootstrap.servers": bootstrap})
     futures = admin.create_topics(
         [
@@ -159,12 +146,10 @@ def test_invalid_raw_event_reaches_dlq():
         future.result(timeout=20)
 
     settings = Settings(
-        database_url=(
-            os.environ.get("NEWSREC_DATABASE_URL") or os.environ["ZHIHUREC_DATABASE_URL"]
-        ),
+        database_url=os.environ["NEWSREC_DATABASE_URL"],
         event_mode="kafka_async",
         kafka_bootstrap_servers=bootstrap,
-        kafka_profile_group_id=f"zhihurec-test-profile-{suffix}",
+        kafka_profile_group_id=f"newsrec-test-profile-{suffix}",
         kafka_raw_events_topic=raw_topic,
         kafka_training_topic=training_topic,
         kafka_dlq_topic=dlq_topic,
@@ -178,7 +163,7 @@ def test_invalid_raw_event_reaches_dlq():
     consumer = Consumer(
         {
             "bootstrap.servers": bootstrap,
-            "group.id": f"zhihurec-test-dlq-{suffix}",
+            "group.id": f"newsrec-test-dlq-{suffix}",
             "auto.offset.reset": "earliest",
             "enable.auto.commit": False,
         }

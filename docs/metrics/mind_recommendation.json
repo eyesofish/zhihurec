@@ -101,9 +101,9 @@
     "training_cutoff_ts": 1573677386
   },
   "system": {
-    "als_training_seconds": 0.64,
-    "artifact_size_bytes": 9088247,
-    "lightgbm_training_seconds": 1.517,
-    "total_pipeline_seconds": 24.815
+    "als_training_seconds": 0.569,
+    "artifact_size_bytes": 9088249,
+    "lightgbm_training_seconds": 2.521,
+    "total_pipeline_seconds": 25.441
   }
 }

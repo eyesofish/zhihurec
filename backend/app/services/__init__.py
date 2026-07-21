@@ -1,1 +1,1 @@
-"""Service layer for the ZhihuRec backend."""
+"""Service layer for the NewsIntentRec backend."""

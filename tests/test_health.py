@@ -24,7 +24,7 @@ def test_healthz_fails_when_mysql_is_not_configured(unwired_client):
 def test_metrics_endpoint_exposes_prometheus_text(unwired_client):
     response = unwired_client.get("/metrics")
     assert response.status_code == 200
-    assert "zhihurec_http_requests_total" in response.text
+    assert "newsrec_http_requests_total" in response.text
 
 
 def test_livez_does_not_open_mysql_connection():

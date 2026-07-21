@@ -36,9 +36,9 @@ def parse_args() -> argparse.Namespace:
         "build/mind_demo_world",
     )
     parser = argparse.ArgumentParser(
-        description="Apply ZhihuRec V1 schema and demo seed SQL to MySQL."
+        description="Apply the NewsIntentRec schema and demo seed SQL to MySQL."
     )
-    parser.add_argument("--schema-sql", default="sql/v1_schema.sql", help="Schema SQL file.")
+    parser.add_argument("--schema-sql", default="sql/schema.sql", help="Schema SQL file.")
     parser.add_argument(
         "--seed-sql",
         default=f"{seed_dir}/import_demo_world.sql",

@@ -15,39 +15,39 @@ from prometheus_client import (
 )
 
 HTTP_REQUESTS = Counter(
-    "zhihurec_http_requests_total",
+    "newsrec_http_requests_total",
     "HTTP requests handled by the API.",
     ("method", "path", "status"),
 )
 HTTP_REQUEST_DURATION = Histogram(
-    "zhihurec_http_request_duration_seconds",
+    "newsrec_http_request_duration_seconds",
     "HTTP request duration.",
     ("method", "path"),
 )
 CONSUMER_EVENTS = Counter(
-    "zhihurec_consumer_events_total",
+    "newsrec_consumer_events_total",
     "Kafka profile-consumer outcomes.",
     ("outcome", "event_type"),
 )
 CONSUMER_RETRIES = Counter(
-    "zhihurec_consumer_retries_total",
+    "newsrec_consumer_retries_total",
     "Kafka profile-consumer transient retries.",
 )
 CONSUMER_LAG = Gauge(
-    "zhihurec_consumer_lag_messages",
+    "newsrec_consumer_lag_messages",
     "Approximate Kafka consumer lag by partition.",
     ("topic", "partition"),
 )
 OUTBOX_PUBLISHED = Counter(
-    "zhihurec_outbox_published_total",
+    "newsrec_outbox_published_total",
     "Outbox messages delivered to Kafka.",
 )
 OUTBOX_FAILURES = Counter(
-    "zhihurec_outbox_failures_total",
+    "newsrec_outbox_failures_total",
     "Outbox publish batch failures.",
 )
 OUTBOX_ROWS = Gauge(
-    "zhihurec_outbox_rows",
+    "newsrec_outbox_rows",
     "Current outbox rows by status.",
     ("status",),
 )
@@ -96,11 +96,11 @@ class JsonLogFormatter(logging.Formatter):
 
 def configure_logging(level: int = logging.INFO) -> None:
     root = logging.getLogger()
-    if any(getattr(handler, "_zhihurec_json", False) for handler in root.handlers):
+    if any(getattr(handler, "_newsrec_json", False) for handler in root.handlers):
         return
     handler = logging.StreamHandler()
     handler.setFormatter(JsonLogFormatter())
-    handler._zhihurec_json = True  # type: ignore[attr-defined]
+    handler._newsrec_json = True  # type: ignore[attr-defined]
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(level)

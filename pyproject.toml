@@ -1,4 +1,4 @@
-# ZhihuRec V1 tooling configuration.
+# NewsIntentRec tooling configuration.
 # This file intentionally does NOT declare [project]: the repo is run as scripts,
 # not installed as a package. V2 may add [project] when shared eval code becomes a real package.
 
@@ -31,12 +31,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Scripts are one-shot exploratory code; allow style drift.
+# Scripts are one-shot tooling; allow selected style drift.
 "scripts/*.py" = ["B", "SIM", "UP"]
-# eda.py intentionally writes Chinese report text with full-width punctuation.
-"scripts/eda.py" = ["RUF001"]
-# demo_content scripts intentionally generate Chinese display text with full-width punctuation.
-"scripts/demo_content/*.py" = ["RUF001"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -48,7 +44,7 @@ python_version = "3.13"
 files = ["backend/app"]
 plugins = ["pydantic.mypy"]
 explicit_package_bases = true
-# Middle-path strictness (see plan README Trade-off table E2).
+# Backend application strictness.
 disallow_untyped_defs = true
 warn_return_any = true
 warn_unused_ignores = true

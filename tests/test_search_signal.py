@@ -14,19 +14,14 @@ from backend.app.schemas.profile import ProfileRecentQuery
 def test_legacy_search_signal_does_not_decay():
     query = ProfileRecentQuery(query_key="1", query_ts=100)
 
-    assert (
-        recent_query_multiplier(query, now_ts=100_000, config=LEGACY_SEARCH_CONFIG)
-        == 1.0
-    )
+    assert recent_query_multiplier(query, now_ts=100_000, config=LEGACY_SEARCH_CONFIG) == 1.0
 
 
 def test_decay_search_signal_halves_and_expires():
     config = SEARCH_SIGNAL_CONFIGS["lgb_plus_als_plus_search_decay_30m"]
     query = ProfileRecentQuery(query_key="1", query_ts=100)
 
-    assert recent_query_multiplier(query, now_ts=100 + 30 * 60, config=config) == pytest.approx(
-        0.5
-    )
+    assert recent_query_multiplier(query, now_ts=100 + 30 * 60, config=config) == pytest.approx(0.5)
     assert recent_query_multiplier(query, now_ts=100 + 121 * 60, config=config) == 0.0
 
 

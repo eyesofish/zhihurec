@@ -472,7 +472,7 @@ def load_sponsored_attribution(
     *,
     delivery_id: str,
     user_id: int,
-    answer_id: int,
+    article_id: int,
     for_update: bool = False,
 ) -> dict[str, Any]:
     lock_clause = " FOR UPDATE" if for_update else ""
@@ -498,8 +498,8 @@ def load_sponsored_attribution(
         row = cursor.fetchone()
     if row is None:
         raise ValueError(f"unknown sponsored_delivery_id: {delivery_id}")
-    if int(row["user_id"]) != user_id or int(row["answer_id"]) != answer_id:
-        raise ValueError("sponsored delivery does not match user_id and answer_id")
+    if int(row["user_id"]) != user_id or int(row["answer_id"]) != article_id:
+        raise ValueError("sponsored delivery does not match user_id and article_id")
     return dict(row)
 
 

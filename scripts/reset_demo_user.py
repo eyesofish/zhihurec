@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser = argparse.ArgumentParser(
         description=(
-            "Reset ZhihuRec demo user profiles. By default all personas in the "
+            "Reset NewsIntentRec demo user profiles. By default all personas in the "
             "multi-persona seed are reset; pass --user-id to reset only one persona."
         )
     )
@@ -289,7 +289,7 @@ def main() -> None:
             for seed in seeds:
                 user_id, click_count, query_count = reset_one(cursor, seed)
                 print(f"reset user_profile user_id={user_id}")
-                print(f"  recent_clicked_answers={click_count}")
+                print(f"  recent_clicked_articles={click_count}")
                 print(f"  recent_queries={query_count}")
     finally:
         connection.close()

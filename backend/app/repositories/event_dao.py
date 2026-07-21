@@ -170,7 +170,7 @@ def record_click_event(
     connection: Any,
     user_id: int,
     event_type: str,
-    answer_id: int,
+    article_id: int,
     query_key: str | None,
     request_id: str | None,
     surface: str,
@@ -211,7 +211,7 @@ def record_click_event(
                 external_event_id,
                 user_id,
                 event_type,
-                answer_id,
+                article_id,
                 sponsored_delivery_id,
                 campaign_id,
                 creative_id,
@@ -231,7 +231,7 @@ def record_log_only_event(
     user_id: int,
     event_type: str,
     surface: str,
-    answer_id: int | None,
+    article_id: int | None,
     query_key: str | None,
     request_id: str | None,
     event_ts: int,
@@ -244,8 +244,7 @@ def record_log_only_event(
 ) -> bool:
     """Insert a user_event row without mutating user_profile.
 
-    Used by Reddit-like Product events (feed_impression, detail_view, dwell, downvote, share)
-    that we log for analytics but that do not update behavior_score or topic weights in V1.
+    Used by log-only product events that do not update behavior score or category weights.
     """
     with connection.cursor() as cursor:
         cursor.execute(
@@ -277,7 +276,7 @@ def record_log_only_event(
                 external_event_id,
                 user_id,
                 event_type,
-                answer_id,
+                article_id,
                 sponsored_delivery_id,
                 campaign_id,
                 creative_id,
@@ -297,7 +296,7 @@ def record_log_only_event(
 def apply_click_profile_update(
     connection: Any,
     profile_row: dict[str, Any],
-    answer_id: int,
+    article_id: int,
     event_ts: int,
     topic_deltas: dict[int, float],
     behavior_delta: float,
@@ -307,7 +306,7 @@ def apply_click_profile_update(
     next_topic_weights = updated_topic_weights(current_weights, topic_deltas, decay_factor)
     recent_clicks = parse_json(profile_row.get("recent_clicked_answers_json"), [])
     next_recent_clicks = [
-        {"answer_id": answer_id, "click_ts": event_ts},
+        {"answer_id": article_id, "click_ts": event_ts},
         *[row for row in recent_clicks if isinstance(row, dict)],
     ]
     next_recent_clicks.sort(key=lambda row: int(row.get("click_ts") or 0), reverse=True)

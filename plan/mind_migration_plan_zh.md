@@ -1,6 +1,6 @@
 # MIND 数据集完整迁移计划
 
-状态：**Active**
+状态：**Completed (2026-07-21)**
 
 目标项目名（工作名）：**NewsIntentRec**
 
@@ -804,23 +804,23 @@ npm run build
 
 只有同时满足以下条件，才算完成：
 
-- [ ] 默认数据源为 MIND-small；
-- [ ] raw MIND 数据不进入 Git；
-- [ ] 下载流程包含显式许可确认；
-- [ ] MIND adapter 输出稳定、可追踪的 canonical 数据；
-- [ ] MySQL 可以从 MIND fixture 和 MIND demo world 初始化；
-- [ ] API 和前端使用 article/news 语义；
-- [ ] 产品界面不存在 ZhihuRec 或 Reddit placeholder；
-- [ ] 推荐训练只使用真实 exposure/click label；
-- [ ] train/dev 或 chronological split 没有 request 泄漏；
-- [ ] ALS 对 unknown user 的行为被明确处理；
-- [ ] 搜索机制没有被包装成 MIND observed search；
-- [ ] 主推荐指标和 intent mechanism 指标分开；
-- [ ] 最新数据分析和 metrics 来自 MIND；
-- [ ] README 清楚说明 public dataset、license 和项目独立性；
-- [ ] 全部现有测试、前端 build、MySQL/Kafka integration 和 smoke 通过；
-- [ ] 旧 ZhihuRec 当前 artifacts 和默认入口已删除；
-- [ ] 最终全仓残留审计通过。
+- [x] 默认数据源为 MIND-small；
+- [x] raw MIND 数据不进入 Git；
+- [x] 下载流程包含显式许可确认；
+- [x] MIND adapter 输出稳定、可追踪的 canonical 数据；
+- [x] MySQL 可以从 MIND fixture 和 MIND demo world 初始化；
+- [x] API 和前端使用 article/news 语义；
+- [x] 产品界面不存在旧数据集或社区 placeholder；
+- [x] 推荐训练只使用真实 exposure/click label；
+- [x] train/dev 或 chronological split 没有 request 泄漏；
+- [x] ALS 对 unknown user 的行为被明确处理；
+- [x] 搜索机制没有被包装成 MIND observed search；
+- [x] 主推荐指标和 intent mechanism 指标分开；
+- [x] 最新数据分析和 metrics 来自 MIND；
+- [x] README 清楚说明 public dataset、license 和项目独立性；
+- [x] 全部现有测试、前端 build、MySQL/Kafka integration 和 smoke 通过；
+- [x] 旧数据源当前 artifacts 和默认入口已删除；
+- [x] 最终全仓残留审计通过。
 
 ---
 

@@ -289,14 +289,14 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 base_score = (
                     round(
                         float(row.get("hot_score") or candidate["raw_base_score"] or 0)
-                        / max_hot_score,
+                        / (float(row.get("hot_score") or candidate["raw_base_score"] or 0) + 100.0),
                         6,
                     )
-                    if max_hot_score > 0
+                    if float(row.get("hot_score") or candidate["raw_base_score"] or 0) > 0
                     else 0.0
                 )
                 feat = build_feature_dict(
-                    answer_row=row,
+                    article_row=row,
                     topic_ids=topic_ids,
                     topic_weight_map=topic_weight_map,
                     default_topic_weight_map=default_topic_weight_map,
@@ -631,13 +631,13 @@ class MysqlRuntimeRepository(RuntimeRepository):
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
             user_id=payload.user_id,
-            answer_id=payload.article_id,
+            article_id=payload.article_id,
         )
         event = self._event_message(
             event_type="recommendation_click",
             user_id=payload.user_id,
             event_id=payload.event_id,
-            answer_id=payload.article_id,
+            article_id=payload.article_id,
             request_id=payload.request_id,
             sponsored_delivery_id=payload.sponsored_delivery_id,
             campaign_id=(
@@ -672,7 +672,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     connection,
                     delivery_id=payload.sponsored_delivery_id,
                     user_id=payload.user_id,
-                    answer_id=payload.article_id,
+                    article_id=payload.article_id,
                     for_update=True,
                 )
             profile_row = fetch_profile_row(connection, payload.user_id, for_update=True)
@@ -685,7 +685,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 connection=connection,
                 user_id=payload.user_id,
                 event_type="recommendation_click",
-                answer_id=payload.article_id,
+                article_id=payload.article_id,
                 query_key=None,
                 request_id=payload.request_id,
                 surface="feed",
@@ -705,7 +705,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
             update = apply_click_profile_update(
                 connection=connection,
                 profile_row=profile_row,
-                answer_id=payload.article_id,
+                article_id=payload.article_id,
                 event_ts=event_ts,
                 topic_deltas=topic_deltas,
                 behavior_delta=self._settings.recommendation_click_behavior_delta,
@@ -739,13 +739,13 @@ class MysqlRuntimeRepository(RuntimeRepository):
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
             user_id=payload.user_id,
-            answer_id=payload.article_id,
+            article_id=payload.article_id,
         )
         event = self._event_message(
             event_type="search_result_click",
             user_id=payload.user_id,
             event_id=payload.event_id,
-            answer_id=payload.article_id,
+            article_id=payload.article_id,
             query_key=query_key,
             request_id=payload.request_id,
             sponsored_delivery_id=payload.sponsored_delivery_id,
@@ -781,7 +781,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     connection,
                     delivery_id=payload.sponsored_delivery_id,
                     user_id=payload.user_id,
-                    answer_id=payload.article_id,
+                    article_id=payload.article_id,
                     for_update=True,
                 )
             profile_row = fetch_profile_row(connection, payload.user_id, for_update=True)
@@ -801,7 +801,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 connection=connection,
                 user_id=payload.user_id,
                 event_type="search_result_click",
-                answer_id=payload.article_id,
+                article_id=payload.article_id,
                 query_key=query_key,
                 request_id=payload.request_id,
                 surface="search",
@@ -827,7 +827,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
             update = apply_click_profile_update(
                 connection=connection,
                 profile_row=profile_row,
-                answer_id=payload.article_id,
+                article_id=payload.article_id,
                 event_ts=event_ts,
                 topic_deltas=topic_deltas,
                 behavior_delta=self._settings.search_result_click_behavior_delta,
@@ -1020,13 +1020,13 @@ class MysqlRuntimeRepository(RuntimeRepository):
             sponsored_attribution = self._load_sponsored_event_attribution(
                 delivery_id=payload.sponsored_delivery_id,
                 user_id=payload.user_id,
-                answer_id=payload.article_id,
+                article_id=payload.article_id,
             )
             event = self._event_message(
                 event_type="upvote",
                 user_id=payload.user_id,
                 event_id=payload.event_id,
-                answer_id=payload.article_id,
+                article_id=payload.article_id,
                 query_key=payload.query_key,
                 request_id=payload.request_id,
                 sponsored_delivery_id=payload.sponsored_delivery_id,
@@ -1069,7 +1069,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                         connection,
                         delivery_id=payload.sponsored_delivery_id,
                         user_id=payload.user_id,
-                        answer_id=payload.article_id,
+                        article_id=payload.article_id,
                         for_update=True,
                     )
                 profile_row = fetch_profile_row(connection, payload.user_id, for_update=True)
@@ -1082,7 +1082,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     connection=connection,
                     user_id=payload.user_id,
                     event_type="upvote",
-                    answer_id=payload.article_id,
+                    article_id=payload.article_id,
                     query_key=payload.query_key,
                     request_id=payload.request_id,
                     surface=payload.surface or "home_feed",
@@ -1102,7 +1102,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 update = apply_click_profile_update(
                     connection=connection,
                     profile_row=profile_row,
-                    answer_id=payload.article_id,
+                    article_id=payload.article_id,
                     event_ts=event_ts,
                     topic_deltas=topic_deltas,
                     behavior_delta=self._settings.recommendation_click_behavior_delta,
@@ -1131,13 +1131,13 @@ class MysqlRuntimeRepository(RuntimeRepository):
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
             user_id=payload.user_id,
-            answer_id=payload.article_id,
+            article_id=payload.article_id,
         )
         event = self._event_message(
             event_type=cast(UserEventType, payload.event_type),
             user_id=payload.user_id,
             event_id=payload.event_id,
-            answer_id=payload.article_id,
+            article_id=payload.article_id,
             query_key=payload.query_key,
             request_id=payload.request_id,
             sponsored_delivery_id=payload.sponsored_delivery_id,
@@ -1180,7 +1180,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     connection,
                     delivery_id=payload.sponsored_delivery_id,
                     user_id=payload.user_id,
-                    answer_id=payload.article_id,
+                    article_id=payload.article_id,
                     for_update=True,
                 )
             inserted = record_log_only_event(
@@ -1188,7 +1188,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 user_id=payload.user_id,
                 event_type=payload.event_type,
                 surface=payload.surface or "home_feed",
-                answer_id=payload.article_id,
+                article_id=payload.article_id,
                 query_key=payload.query_key,
                 request_id=payload.request_id,
                 event_ts=event_ts,
@@ -1256,7 +1256,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
         *,
         delivery_id: str | None,
         user_id: int,
-        answer_id: int,
+        article_id: int,
     ) -> dict[str, Any] | None:
         if not delivery_id:
             return None
@@ -1266,7 +1266,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 connection,
                 delivery_id=delivery_id,
                 user_id=user_id,
-                answer_id=answer_id,
+                article_id=article_id,
             )
         finally:
             connection.close()
@@ -1337,7 +1337,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
         user_id: int,
         event_ts: int,
         event_id: str | None = None,
-        answer_id: int | None = None,
+        article_id: int | None = None,
         query_key: str | None = None,
         query_text: str | None = None,
         request_id: str | None = None,
@@ -1350,7 +1350,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
         message_values: dict[str, Any] = {
             "event_type": event_type,
             "user_id": user_id,
-            "article_id": answer_id,
+            "article_id": article_id,
             "query_key": query_key,
             "query_text": query_text,
             "request_id": request_id,

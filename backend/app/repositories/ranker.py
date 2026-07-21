@@ -23,7 +23,7 @@ _MODEL: lgb.Booster | None = None
 _FEATURE_ORDER: list[str] = []
 _METADATA: dict[str, Any] = {}
 _MODEL_SIGNATURE: tuple[int, int] | None = None
-FEATURE_SCHEMA_VERSION = 3
+FEATURE_SCHEMA_VERSION = 4
 RANKER_FEATURE_COLUMNS = (
     "base_score",
     "personalized_topic_score",
@@ -32,15 +32,15 @@ RANKER_FEATURE_COLUMNS = (
     "query_recall_boost",
     "user_behavior_score",
     "user_topic_count",
-    "answer_hot_score",
-    "answer_click_count",
-    "answer_impression_count",
-    "answer_age_hours",
-    "answer_has_picture",
-    "answer_has_video",
-    "answer_is_high_value",
-    "answer_is_editor_recommended",
-    "author_is_excellent_answerer",
+    "article_hot_score",
+    "article_click_count",
+    "article_impression_count",
+    "article_age_hours",
+    "article_has_picture",
+    "article_has_video",
+    "article_is_high_value",
+    "article_is_editor_recommended",
+    "source_is_preferred",
 )
 
 
@@ -102,7 +102,7 @@ def score_candidates(feature_dicts: list[dict[str, float]]) -> list[float] | Non
 
 def build_feature_dict(
     *,
-    answer_row: dict[str, Any],
+    article_row: dict[str, Any],
     topic_ids: set[int],
     topic_weight_map: dict[int, float],
     default_topic_weight_map: dict[int, float],
@@ -112,27 +112,27 @@ def build_feature_dict(
     now_ts: float | None = None,
     user_behavior_score: float = 0.0,
     user_topic_count: int = 0,
-    answer_hot_score: float | None = None,
-    answer_click_count: int | None = None,
-    answer_impression_count: int | None = None,
+    article_hot_score: float | None = None,
+    article_click_count: int | None = None,
+    article_impression_count: int | None = None,
 ) -> dict[str, float]:
     """Build one feature dict matching the training feature columns.
 
-    This mirrors the _join_features logic in training_data.py so the online
-    feature distribution stays aligned with training.
+    This mirrors the normalized-MIND feature builder so online inference stays aligned
+    with training.
     """
     import time as _time
 
     hot = (
-        float(answer_hot_score)
-        if answer_hot_score is not None
-        else float(answer_row.get("hot_score") or 0)
+        float(article_hot_score)
+        if article_hot_score is not None
+        else float(article_row.get("hot_score") or 0)
     )
     personalized = sum(topic_weight_map.get(tid, 0.0) for tid in topic_ids)
     default_ts = sum(default_topic_weight_map.get(tid, 0.0) for tid in topic_ids)
     topic_match = alpha * personalized + (1.0 - alpha) * default_ts
     query_boost = sum(query_topic_scores.get(tid, 0.0) for tid in topic_ids)
-    create_ts = int(answer_row.get("create_ts") or 0)
+    create_ts = int(article_row.get("create_ts") or 0)
     if now_ts is None:
         now_ts = _time.time()
     age_hours = max(0.0, (now_ts - create_ts) / 3600.0) if create_ts > 0 else 0.0
@@ -145,21 +145,21 @@ def build_feature_dict(
         "query_recall_boost": round(query_boost, 6),
         "user_behavior_score": round(user_behavior_score, 6),
         "user_topic_count": int(user_topic_count),
-        "answer_hot_score": round(hot, 6),
-        "answer_click_count": (
-            int(answer_click_count)
-            if answer_click_count is not None
-            else int(answer_row.get("click_count") or 0)
+        "article_hot_score": round(hot, 6),
+        "article_click_count": (
+            int(article_click_count)
+            if article_click_count is not None
+            else int(article_row.get("click_count") or 0)
         ),
-        "answer_impression_count": (
-            int(answer_impression_count)
-            if answer_impression_count is not None
-            else int(answer_row.get("impression_count") or 0)
+        "article_impression_count": (
+            int(article_impression_count)
+            if article_impression_count is not None
+            else int(article_row.get("impression_count") or 0)
         ),
-        "answer_age_hours": round(age_hours, 2),
-        "answer_has_picture": int(answer_row.get("has_picture") or 0),
-        "answer_has_video": int(answer_row.get("has_video") or 0),
-        "answer_is_high_value": int(answer_row.get("is_high_value") or 0),
-        "answer_is_editor_recommended": int(answer_row.get("is_editor_recommended") or 0),
-        "author_is_excellent_answerer": int(answer_row.get("is_excellent_answerer") or 0),
+        "article_age_hours": round(age_hours, 2),
+        "article_has_picture": int(article_row.get("has_picture") or 0),
+        "article_has_video": int(article_row.get("has_video") or 0),
+        "article_is_high_value": int(article_row.get("is_high_value") or 0),
+        "article_is_editor_recommended": int(article_row.get("is_editor_recommended") or 0),
+        "source_is_preferred": int(article_row.get("is_excellent_answerer") or 0),
     }

@@ -19,13 +19,7 @@ jobs:
       - run: python -m pip install -r backend/requirements-dev.txt
       - run: python -m pip check
       - run: python -m ruff check backend scripts tests
-      - run: >-
-          python -m ruff format --check backend scripts tests
-          --exclude scripts/demo_content/cluster_topics.py
-          --exclude scripts/demo_content/generate_labels.py
-          --exclude scripts/demo_content/templates.py
-          --exclude tests/test_article_card_route.py
-          --exclude tests/test_search_route.py
+      - run: python -m ruff format --check backend scripts tests
       - run: python -m mypy
       - run: python -m pytest -q
       - uses: actions/setup-node@v4

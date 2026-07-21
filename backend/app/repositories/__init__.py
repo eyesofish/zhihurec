@@ -1,1 +1,1 @@
-"""Repository implementations for the ZhihuRec backend."""
+"""Repository implementations for the NewsIntentRec backend."""

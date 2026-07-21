@@ -1,1 +1,1 @@
-"""ZhihuRec backend application package."""
+"""NewsIntentRec backend application package."""

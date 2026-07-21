@@ -153,7 +153,7 @@ def _build_features(
     features = pd.DataFrame(
         {
             "user_id": frame["user_id"].astype(np.int64),
-            "answer_id": frame["article_id"].astype(np.int64),
+            "article_id": frame["article_id"].astype(np.int64),
             "request_id": frame["request_id"].astype(str),
             "event_ts": frame["event_ts"].astype(np.int64),
             "label": frame["clicked"].astype(np.int8),
@@ -168,15 +168,15 @@ def _build_features(
             "user_topic_count": [
                 len(request_profiles.get(str(request_id), {})) for request_id in frame["request_id"]
             ],
-            "answer_hot_score": hot,
-            "answer_click_count": prior_click_array,
-            "answer_impression_count": prior_impression_array,
-            "answer_age_hours": age_hours,
-            "answer_has_picture": 0,
-            "answer_has_video": 0,
-            "answer_is_high_value": 0,
-            "answer_is_editor_recommended": 0,
-            "author_is_excellent_answerer": 0,
+            "article_hot_score": hot,
+            "article_click_count": prior_click_array,
+            "article_impression_count": prior_impression_array,
+            "article_age_hours": age_hours,
+            "article_has_picture": 0,
+            "article_has_video": 0,
+            "article_is_high_value": 0,
+            "article_is_editor_recommended": 0,
+            "source_is_preferred": 0,
         }
     )
     return features
@@ -280,7 +280,7 @@ def _als_scores(
     scores = np.zeros(len(frame), dtype=np.float64)
     for index, row in enumerate(frame.itertuples(index=False)):
         user_index = user_map.get(int(row.user_id))
-        item_index = item_map.get(int(row.answer_id))
+        item_index = item_map.get(int(row.article_id))
         if user_index is not None and item_index is not None:
             scores[index] = float(
                 np.dot(model.user_factors[user_index], model.item_factors[item_index])
@@ -293,7 +293,7 @@ def _ranking_metrics(
     scores: np.ndarray,
     article_category: dict[int, int],
 ) -> dict[str, float | int]:
-    scored = frame[["request_id", "answer_id", "label"]].copy()
+    scored = frame[["request_id", "article_id", "label"]].copy()
     scored["score"] = scores
     totals = Counter()
     request_count = 0
@@ -302,7 +302,7 @@ def _ranking_metrics(
         positives = int(rows["label"].sum())
         if positives <= 0:
             continue
-        ordered = rows.sort_values(["score", "answer_id"], ascending=[False, True])
+        ordered = rows.sort_values(["score", "article_id"], ascending=[False, True])
         labels = ordered["label"].astype(int).tolist()
         request_count += 1
         for k in (5, 10):
@@ -320,7 +320,7 @@ def _ranking_metrics(
             len(
                 {
                     article_category.get(int(article_id))
-                    for article_id in ordered["answer_id"].head(10)
+                    for article_id in ordered["article_id"].head(10)
                 }
             )
         )
@@ -356,7 +356,7 @@ def _candidate_recall(
     index = faiss.IndexFlatIP(item_embeddings.shape[1])
     index.add(item_embeddings)
     relevant_by_request = {
-        request_id: set(rows.loc[rows["label"] == 1, "answer_id"].astype(int))
+        request_id: set(rows.loc[rows["label"] == 1, "article_id"].astype(int))
         for request_id, rows in frame.groupby("request_id")
     }
     user_by_request = frame.groupby("request_id")["user_id"].first().astype(int).to_dict()
@@ -532,7 +532,7 @@ def main() -> None:
     data_fingerprint = hashlib.sha256(
         pd.util.hash_pandas_object(
             train_features[
-                ["user_id", "answer_id", "request_id", "event_ts", "label", *feature_columns]
+                ["user_id", "article_id", "request_id", "event_ts", "label", *feature_columns]
             ],
             index=False,
         ).values.tobytes()
@@ -562,7 +562,7 @@ def main() -> None:
     popularity_scores = np.asarray(
         [
             train_total_clicks[int(article_id)] * 10 + train_total_impressions[int(article_id)]
-            for article_id in test_features["answer_id"]
+            for article_id in test_features["article_id"]
         ],
         dtype=np.float64,
     )

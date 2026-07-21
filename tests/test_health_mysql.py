@@ -11,9 +11,7 @@ from backend.app.health import check_readiness
 pytestmark = [
     pytest.mark.mysql,
     pytest.mark.skipif(
-        not (
-            os.environ.get("NEWSREC_DATABASE_URL") or os.environ.get("ZHIHUREC_DATABASE_URL", "")
-        ).strip(),
+        not os.environ.get("NEWSREC_DATABASE_URL", "").strip(),
         reason="NEWSREC_DATABASE_URL not set",
     ),
 ]
@@ -27,9 +25,9 @@ def test_kafka_readiness_requires_worker_heartbeats(monkeypatch):
         def list_topics(self, timeout):
             return SimpleNamespace(
                 topics={
-                    "zhihurec.events.raw": object(),
-                    "zhihurec.training.interactions": object(),
-                    "zhihurec.events.dlq": object(),
+                    "newsrec.events.raw": object(),
+                    "newsrec.training.interactions": object(),
+                    "newsrec.events.dlq": object(),
                 }
             )
 
@@ -38,9 +36,7 @@ def test_kafka_readiness_requires_worker_heartbeats(monkeypatch):
         lambda _name: SimpleNamespace(AdminClient=FakeAdminClient),
     )
     settings = Settings(
-        database_url=(
-            os.environ.get("NEWSREC_DATABASE_URL") or os.environ["ZHIHUREC_DATABASE_URL"]
-        ),
+        database_url=os.environ["NEWSREC_DATABASE_URL"],
         event_mode="kafka_async",
     )
 

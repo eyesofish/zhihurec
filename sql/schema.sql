@@ -1,5 +1,5 @@
--- MySQL 8.0 schema for the configured ZhihuRec runtime database.
--- Raw ZhihuRec CSV files and build/demo_world artifacts remain offline inputs only.
+-- MySQL 8.0 schema for the configured NewsIntentRec runtime database.
+-- Raw MIND files and normalized/model artifacts remain offline inputs only.
 -- Online services must read MySQL tables below as the single runtime source of truth.
 
 DROP TABLE IF EXISTS event_outbox;
@@ -27,26 +27,26 @@ DROP TABLE IF EXISTS worker_heartbeat;
 
 CREATE TABLE topic (
   topic_id BIGINT NOT NULL,
-  display_name VARCHAR(128) NULL COMMENT 'Synthetic/demo label because ZhihuRec does not expose raw topic text.',
+  display_name VARCHAR(128) NULL COMMENT 'MIND category or subcategory label.',
   answer_count INT NOT NULL DEFAULT 0,
   question_count INT NOT NULL DEFAULT 0,
-  source VARCHAR(32) NOT NULL DEFAULT 'zhihurec_1m',
+  source VARCHAR(32) NOT NULL DEFAULT 'mind_small',
   PRIMARY KEY (topic_id)
-) ENGINE=InnoDB COMMENT='Project topic dimension derived from ZhihuRec.';
+) ENGINE=InnoDB COMMENT='News category dimension.';
 
 CREATE TABLE author (
   author_id BIGINT NOT NULL,
-  display_name VARCHAR(128) NULL COMMENT 'Synthetic/demo author label.',
+  display_name VARCHAR(128) NULL COMMENT 'Source domain compatibility dimension.',
   is_excellent_author TINYINT(1) NOT NULL DEFAULT 0,
   follower_count INT NOT NULL DEFAULT 0,
   is_excellent_answerer TINYINT(1) NOT NULL DEFAULT 0,
-  source VARCHAR(32) NOT NULL DEFAULT 'zhihurec_1m',
+  source VARCHAR(32) NOT NULL DEFAULT 'mind_small',
   PRIMARY KEY (author_id)
-) ENGINE=InnoDB COMMENT='Content authors derived from ZhihuRec info_author.';
+) ENGINE=InnoDB COMMENT='Source-domain compatibility records.';
 
 CREATE TABLE app_user (
   user_id BIGINT NOT NULL,
-  display_name VARCHAR(128) NULL COMMENT 'Synthetic/demo user label.',
+  display_name VARCHAR(128) NULL COMMENT 'Demo persona label.',
   register_ts BIGINT NULL,
   gender TINYINT NULL,
   login_frequency TINYINT NULL,
@@ -61,9 +61,9 @@ CREATE TABLE app_user (
   city VARCHAR(64) NULL,
   followed_topic_ids_json JSON NULL,
   is_demo_user TINYINT(1) NOT NULL DEFAULT 0,
-  source VARCHAR(32) NOT NULL DEFAULT 'zhihurec_1m',
+  source VARCHAR(32) NOT NULL DEFAULT 'mind_small',
   PRIMARY KEY (user_id)
-) ENGINE=InnoDB COMMENT='Project users seeded from ZhihuRec info_user.';
+) ENGINE=InnoDB COMMENT='MIND-derived demo users and compatibility records.';
 
 CREATE TABLE event_idempotency (
   external_event_id VARCHAR(128) NOT NULL,
@@ -99,12 +99,12 @@ CREATE TABLE question (
   follower_count INT NOT NULL DEFAULT 0,
   invitation_count INT NOT NULL DEFAULT 0,
   comment_count INT NOT NULL DEFAULT 0,
-  token_ids_json JSON NULL COMMENT 'Token IDs from ZhihuRec because raw text is unavailable.',
+  token_ids_json JSON NULL COMMENT 'Reserved compatibility field.',
   topic_ids_json JSON NULL,
-  display_title VARCHAR(255) NULL COMMENT 'Synthetic/demo title used by the UI.',
-  source VARCHAR(32) NOT NULL DEFAULT 'zhihurec_1m',
+  display_title VARCHAR(255) NULL COMMENT 'MIND article headline.',
+  source VARCHAR(32) NOT NULL DEFAULT 'mind_small',
   PRIMARY KEY (question_id)
-) ENGINE=InnoDB COMMENT='Project question entities derived from ZhihuRec info_question.';
+) ENGINE=InnoDB COMMENT='Article headline compatibility table.';
 
 CREATE TABLE answer (
   answer_id BIGINT NOT NULL,
@@ -123,15 +123,15 @@ CREATE TABLE answer (
   dislike_count INT NOT NULL DEFAULT 0,
   report_count INT NOT NULL DEFAULT 0,
   helpless_count INT NOT NULL DEFAULT 0,
-  token_ids_json JSON NULL COMMENT 'Token IDs from ZhihuRec because raw answer text is unavailable.',
+  token_ids_json JSON NULL COMMENT 'Reserved compatibility field.',
   topic_ids_json JSON NULL,
-  display_summary TEXT NULL COMMENT 'Synthetic/demo summary used by the UI.',
+  display_summary TEXT NULL COMMENT 'MIND article abstract.',
   vector_key VARCHAR(128) NULL COMMENT 'Lookup key for ANN/vector assets built offline.',
   is_demo_selected TINYINT(1) NOT NULL DEFAULT 0,
   hot_score DOUBLE NOT NULL DEFAULT 0,
   click_count INT NOT NULL DEFAULT 0,
   impression_count INT NOT NULL DEFAULT 0,
-  source VARCHAR(32) NOT NULL DEFAULT 'zhihurec_1m',
+  source VARCHAR(32) NOT NULL DEFAULT 'mind_small',
   PRIMARY KEY (answer_id),
   KEY idx_answer_question (question_id),
   KEY idx_answer_author (author_id),
@@ -143,7 +143,7 @@ CREATE TABLE answer (
 CREATE TABLE question_topic (
   question_id BIGINT NOT NULL,
   topic_id BIGINT NOT NULL,
-  source_rank SMALLINT NOT NULL DEFAULT 0 COMMENT 'Position inside the original ZhihuRec topic list.',
+  source_rank SMALLINT NOT NULL DEFAULT 0 COMMENT '0=category, 1=subcategory.',
   PRIMARY KEY (question_id, topic_id),
   KEY idx_question_topic_topic (topic_id),
   CONSTRAINT fk_question_topic_question FOREIGN KEY (question_id) REFERENCES question (question_id),
@@ -153,7 +153,7 @@ CREATE TABLE question_topic (
 CREATE TABLE answer_topic (
   answer_id BIGINT NOT NULL,
   topic_id BIGINT NOT NULL,
-  source_rank SMALLINT NOT NULL DEFAULT 0 COMMENT 'Position inside the original ZhihuRec topic list.',
+  source_rank SMALLINT NOT NULL DEFAULT 0 COMMENT '0=category, 1=subcategory.',
   PRIMARY KEY (answer_id, topic_id),
   KEY idx_answer_topic_topic (topic_id),
   CONSTRAINT fk_answer_topic_answer FOREIGN KEY (answer_id) REFERENCES answer (answer_id),
@@ -174,21 +174,21 @@ CREATE TABLE query_topic_map (
   KEY idx_query_topic_topic (topic_id),
   KEY idx_query_topic_rank (query_key, match_rank),
   CONSTRAINT fk_query_topic_topic FOREIGN KEY (topic_id) REFERENCES topic (topic_id)
-) ENGINE=InnoDB COMMENT='Offline query-to-topic bridge derived from ZhihuRec query and click behavior.';
+) ENGINE=InnoDB COMMENT='English query aliases and category mappings.';
 
 CREATE TABLE hot_answer_snapshot (
-  snapshot_key VARCHAR(64) NOT NULL COMMENT 'Named snapshot such as zhihurec_1m_v1.',
+  snapshot_key VARCHAR(64) NOT NULL COMMENT 'Named news hotness snapshot.',
   rank_position INT NOT NULL,
   answer_id BIGINT NOT NULL,
   hot_score DOUBLE NOT NULL,
   click_count INT NOT NULL DEFAULT 0,
   impression_count INT NOT NULL DEFAULT 0,
-  source_window VARCHAR(64) NOT NULL DEFAULT 'zhihurec_1m_full_window',
+  source_window VARCHAR(64) NOT NULL DEFAULT 'selected_mind_impressions',
   PRIMARY KEY (snapshot_key, rank_position),
   UNIQUE KEY uq_hot_snapshot_answer (snapshot_key, answer_id),
   KEY idx_hot_answer_answer (answer_id),
   CONSTRAINT fk_hot_answer_snapshot_answer FOREIGN KEY (answer_id) REFERENCES answer (answer_id)
-) ENGINE=InnoDB COMMENT='Fallback pool for hot answers in the v1 feed.';
+) ENGINE=InnoDB COMMENT='Fallback pool for hot articles.';
 
 CREATE TABLE system_profile_seed (
   seed_key VARCHAR(64) NOT NULL,
@@ -215,7 +215,7 @@ CREATE TABLE user_profile (
   KEY idx_user_profile_seed (cold_start_seed_key),
   CONSTRAINT fk_user_profile_user FOREIGN KEY (user_id) REFERENCES app_user (user_id),
   CONSTRAINT fk_user_profile_seed FOREIGN KEY (cold_start_seed_key) REFERENCES system_profile_seed (seed_key)
-) ENGINE=InnoDB COMMENT='Single-table v1 user profile storage.';
+) ENGINE=InnoDB COMMENT='Single-table user profile storage.';
 
 CREATE TABLE sponsored_campaign (
   campaign_id BIGINT NOT NULL,
@@ -367,7 +367,7 @@ CREATE TABLE user_event (
     FOREIGN KEY (campaign_id) REFERENCES sponsored_campaign (campaign_id),
   CONSTRAINT fk_user_event_creative
     FOREIGN KEY (creative_id) REFERENCES sponsored_creative (creative_id)
-) ENGINE=InnoDB COMMENT='Minimal v1 event log for closed-loop updates and replay.';
+) ENGINE=InnoDB COMMENT='Event log for closed-loop updates and replay.';
 
 CREATE TABLE event_outbox (
   outbox_id BIGINT NOT NULL AUTO_INCREMENT,

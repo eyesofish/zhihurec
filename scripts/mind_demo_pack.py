@@ -149,18 +149,6 @@ def write_mind_demo_pack(
         }
         for persona in personas
     ]
-    compatibility_user_ids = sorted({7248, 1026, 3343} - persona_ids)
-    users.extend(
-        {
-            "user_id": user_id,
-            "display_name": f"Compatibility User {user_id}",
-            "is_demo_user": False,
-            "followed_topic_ids": [],
-            "source": "migration_compat",
-            "source_split": "none",
-        }
-        for user_id in compatibility_user_ids
-    )
 
     impression_counts: Counter[int] = Counter()
     click_counts: Counter[int] = Counter()
@@ -300,19 +288,6 @@ def write_mind_demo_pack(
         }
         for persona in personas
     ]
-    compatibility_profile_seeds = [
-        {
-            "user_id": user_id,
-            "display_name": f"Compatibility User {user_id}",
-            "cold_start_seed_key": "cold_start_default",
-            "topic_weights": [],
-            "recent_clicked_answers": [],
-            "recent_queries": [],
-            "behavior_score": 0.0,
-            "notes": "Temporary migration compatibility profile.",
-        }
-        for user_id in compatibility_user_ids
-    ]
     evaluation_seeds = [
         {
             **seed,
@@ -435,7 +410,7 @@ def write_mind_demo_pack(
     write_json(output_dir / "demo_user_profile_seed.json", profile_seeds[0])
     write_json(
         output_dir / "demo_persona_profile_seeds.json",
-        [*profile_seeds, *compatibility_profile_seeds],
+        profile_seeds,
     )
     write_json(output_dir / "evaluation_persona_profile_seeds.json", evaluation_seeds)
     write_json(
@@ -460,7 +435,6 @@ def write_mind_demo_pack(
         "demo_user_id": personas[0].user_id,
         "demo_user_ids": [persona.user_id for persona in personas],
         "demo_persona_count": len(personas),
-        "compatibility_user_ids": compatibility_user_ids,
         "selected_article_count": len(articles),
         "selected_request_count": len(requests),
         "replay_event_count": len(events),

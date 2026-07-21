@@ -72,21 +72,21 @@ def test_mind_features_use_only_prior_item_counts():
         update_counts=True,
     )
 
-    assert list(features["answer_impression_count"]) == [0, 1]
-    assert list(features["answer_click_count"]) == [0, 1]
+    assert list(features["article_impression_count"]) == [0, 1]
+    assert list(features["article_click_count"]) == [0, 1]
     assert list(features["label"]) == [1, 0]
 
 
 def test_runtime_base_score_matches_mind_training_formula():
     features = build_feature_dict(
-        answer_row={"create_ts": 0},
+        article_row={"create_ts": 0},
         topic_ids=set(),
         topic_weight_map={},
         default_topic_weight_map={},
         query_topic_scores={},
         alpha=0.5,
         max_hot_score=1000,
-        answer_hot_score=100,
+        article_hot_score=100,
     )
 
     assert features["base_score"] == 0.5

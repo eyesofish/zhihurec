@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Publish pending ZhihuRec outbox rows.")
+    parser = argparse.ArgumentParser(description="Publish pending NewsIntentRec outbox rows.")
     parser.add_argument("--once", action="store_true", help="Publish at most one batch.")
     return parser.parse_args()
 

@@ -117,8 +117,6 @@ class Settings:
     consumer_metrics_port: int = 9101
     outbox_metrics_port: int = 9102
     cors_origins: tuple[str, ...] = (
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
         "http://127.0.0.1:5174",
         "http://localhost:5174",
     )
@@ -242,7 +240,7 @@ def get_settings() -> Settings:
             origin.strip()
             for origin in _env(
                 "NEWSREC_CORS_ORIGINS",
-                "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174",
+                "http://127.0.0.1:5174,http://localhost:5174",
             ).split(",")
             if origin.strip()
         ),
