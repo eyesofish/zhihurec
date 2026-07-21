@@ -71,10 +71,8 @@ Desktop.ini
 # Course deliverables — go to Canvas, not GitHub
 /target/
 
-# Personal materials — resume drafts, interview talking points, project stories
+# Personal materials — resume drafts and project stories
 /story/
-/docs/zhihurec_interview_questions.md
-/zhihurec_interview_questions.md
 /docs/resume_bullet.md
 
 # Another course's plan — kept local, not part of this repository
