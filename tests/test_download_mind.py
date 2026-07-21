@@ -71,3 +71,31 @@ def test_download_extracts_and_reuses_checksum_verified_archive(tmp_path: Path):
     assert manifest["official_download_page"].startswith("https://msnews.github.io/")
     checksums = json.loads((tmp_path / "meta/local_checksums.json").read_text())
     assert checksums["algorithm"] == "sha256"
+
+
+def test_download_supports_explicit_raw_file_mirror(tmp_path: Path):
+    requests: list[Request] = []
+
+    def opener(request: Request) -> FakeResponse:
+        requests.append(request)
+        if request.full_url.endswith("news.tsv"):
+            return FakeResponse(b"N1\tnews\tlocal\tTitle\tAbstract\thttps://example.com\t[]\t[]\n")
+        return FakeResponse(b"1\tU1\t11/13/2019 8:36:57 AM\t\tN1-1\n")
+
+    records = download_dataset(
+        variant="small",
+        splits=("train",),
+        raw_root=tmp_path / "raw",
+        meta_root=tmp_path / "meta",
+        accept_license=True,
+        source="huyva",
+        opener=opener,
+    )
+
+    assert len(records) == 2
+    assert all(record.source_kind == "third_party_mirror" for record in records)
+    assert len(requests) == 2
+    assert (tmp_path / "raw/small/train/news.tsv").is_file()
+    manifest = json.loads((tmp_path / "meta/download_manifest.json").read_text())
+    assert manifest["selected_source"] == "huyva"
+    assert manifest["third_party_mirror_repository"].endswith("huyva/MIND-small")

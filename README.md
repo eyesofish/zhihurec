@@ -66,6 +66,10 @@ python scripts/download_mind.py --variant small --split all --accept-license
 python scripts/inspect_mind.py --variant small
 ```
 
+If official gated access is unavailable, an explicit public third-party raw-file mirror
+can be selected with `--source huyva`. There is no silent fallback: the local manifest
+records the mirror repository, every file URL, and its SHA256 checksum.
+
 Raw archives, extracted TSV files, local checksums, and inspection reports remain
 ignored. The inspector validates MIND IDs, timestamps, candidate labels, metadata
 coverage, missing fields, scale, train/dev overlap, and the safe ALS evaluation

@@ -27,6 +27,14 @@ OFFICIAL_DOWNLOADS = {
     for variant in ("small", "large")
 }
 REQUIRED_ARCHIVE_FILES = {"behaviors.tsv", "news.tsv"}
+HUYVA_MIRROR_REPOSITORY = "https://huggingface.co/datasets/huyva/MIND-small"
+HUYVA_MIRROR_DOWNLOADS = {
+    split: {
+        filename: f"{HUYVA_MIRROR_REPOSITORY}/resolve/main/{split}/{filename}"
+        for filename in REQUIRED_ARCHIVE_FILES
+    }
+    for split in ("train", "dev")
+}
 
 
 class MindDownloadError(RuntimeError):
@@ -37,9 +45,11 @@ class MindDownloadError(RuntimeError):
 class DownloadRecord:
     variant: str
     split: str
+    source: str
+    source_kind: str
     url: str
-    archive_path: str
-    extracted_path: str
+    local_path: str
+    extracted_path: str | None
     sha256: str
     size_bytes: int
     downloaded: bool
@@ -89,7 +99,7 @@ def _default_opener(request: Request) -> BinaryIO:
     return urlopen(request, timeout=120)
 
 
-def _download_archive(
+def _download_file(
     url: str,
     destination: Path,
     *,
@@ -177,6 +187,7 @@ def download_dataset(
     raw_root: Path,
     meta_root: Path,
     accept_license: bool,
+    source: str = "official",
     token: str | None = None,
     opener: Callable[[Request], BinaryIO] = _default_opener,
 ) -> list[DownloadRecord]:
@@ -186,6 +197,10 @@ def download_dataset(
         )
     if variant not in OFFICIAL_DOWNLOADS:
         raise MindDownloadError(f"Unsupported MIND variant: {variant}")
+    if source not in {"official", "huyva"}:
+        raise MindDownloadError(f"Unsupported MIND source: {source}")
+    if source == "huyva" and variant != "small":
+        raise MindDownloadError("The huyva mirror only provides MIND-small")
 
     selected_splits = tuple(splits)
     invalid_splits = set(selected_splits) - {"train", "dev"}
@@ -198,6 +213,43 @@ def download_dataset(
     checksum_entries = dict(previous_checksums)
 
     for split in selected_splits:
+        if source == "huyva":
+            for filename in sorted(REQUIRED_ARCHIVE_FILES):
+                file_path = raw_root / variant / split / filename
+                relative_path = file_path.relative_to(raw_root.parent).as_posix()
+                expected_digest = previous_checksums.get(relative_path)
+                downloaded = True
+                if file_path.exists() and expected_digest:
+                    actual_digest = sha256_file(file_path)
+                    if actual_digest == expected_digest:
+                        downloaded = False
+                    else:
+                        file_path.unlink()
+                if downloaded:
+                    _download_file(
+                        HUYVA_MIRROR_DOWNLOADS[split][filename],
+                        file_path,
+                        token=token,
+                        opener=opener,
+                    )
+                digest = sha256_file(file_path)
+                checksum_entries[relative_path] = digest
+                records.append(
+                    DownloadRecord(
+                        variant=variant,
+                        split=split,
+                        source="huyva/MIND-small",
+                        source_kind="third_party_mirror",
+                        url=HUYVA_MIRROR_DOWNLOADS[split][filename],
+                        local_path=relative_path,
+                        extracted_path=None,
+                        sha256=digest,
+                        size_bytes=file_path.stat().st_size,
+                        downloaded=downloaded,
+                    )
+                )
+            continue
+
         archive_name = f"MIND{variant}_{split}.zip"
         archive_path = raw_root / variant / "_archives" / archive_name
         extracted_path = raw_root / variant / split
@@ -213,7 +265,7 @@ def download_dataset(
                 archive_path.unlink()
 
         if downloaded:
-            _download_archive(
+            _download_file(
                 OFFICIAL_DOWNLOADS[variant][split],
                 archive_path,
                 token=token,
@@ -232,8 +284,10 @@ def download_dataset(
             DownloadRecord(
                 variant=variant,
                 split=split,
+                source="official_mind_download_page",
+                source_kind="official",
                 url=OFFICIAL_DOWNLOADS[variant][split],
-                archive_path=relative_archive,
+                local_path=relative_archive,
                 extracted_path=extracted_path.relative_to(raw_root.parent).as_posix(),
                 sha256=digest,
                 size_bytes=archive_path.stat().st_size,
@@ -256,6 +310,10 @@ def download_dataset(
             "generated_at": generated_at,
             "license_url": LICENSE_URL,
             "official_download_page": OFFICIAL_DOWNLOAD_PAGE,
+            "selected_source": source,
+            "third_party_mirror_repository": (
+                HUYVA_MIRROR_REPOSITORY if source == "huyva" else None
+            ),
             "license_accepted_by_cli_flag": True,
             "files": [asdict(record) for record in records],
         },
@@ -267,6 +325,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download the public Microsoft MIND dataset.")
     parser.add_argument("--variant", choices=("small", "large"), default="small")
     parser.add_argument("--split", choices=("train", "dev", "all"), default="all")
+    parser.add_argument("--source", choices=("official", "huyva"), default="official")
     parser.add_argument("--accept-license", action="store_true")
     parser.add_argument("--raw-root", type=Path, default=Path("data/mind/raw"))
     parser.add_argument("--meta-root", type=Path, default=Path("data/mind/meta"))
@@ -283,6 +342,7 @@ def main() -> int:
             raw_root=args.raw_root,
             meta_root=args.meta_root,
             accept_license=args.accept_license,
+            source=args.source,
         )
     except MindDownloadError as exc:
         print(f"error: {exc}")
@@ -290,7 +350,9 @@ def main() -> int:
 
     for record in records:
         action = "downloaded" if record.downloaded else "verified cached"
-        print(f"{action}: {record.variant}/{record.split} sha256={record.sha256}")
+        print(
+            f"{action}: {record.variant}/{record.split} {record.local_path} sha256={record.sha256}"
+        )
     return 0
 
 
