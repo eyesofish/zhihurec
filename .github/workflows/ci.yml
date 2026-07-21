@@ -24,7 +24,7 @@ jobs:
           --exclude scripts/demo_content/cluster_topics.py
           --exclude scripts/demo_content/generate_labels.py
           --exclude scripts/demo_content/templates.py
-          --exclude tests/test_answer_card_route.py
+          --exclude tests/test_article_card_route.py
           --exclude tests/test_search_route.py
       - run: python -m mypy
       - run: python -m pytest -q

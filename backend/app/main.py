@@ -22,7 +22,7 @@ from backend.app.observability import (
     HTTP_REQUESTS,
     configure_logging,
 )
-from backend.app.routers.answers import router as answers_router
+from backend.app.routers.articles import router as articles_router
 from backend.app.routers.debug import router as debug_router
 from backend.app.routers.event import router as event_router
 from backend.app.routers.event_track import router as event_track_router
@@ -183,7 +183,7 @@ def create_app() -> FastAPI:
     app.include_router(debug_router)
     app.include_router(personas_router)
     app.include_router(suggestions_router)
-    app.include_router(answers_router)
+    app.include_router(articles_router)
     app.include_router(event_track_router)
 
     return app

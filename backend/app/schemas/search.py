@@ -46,11 +46,11 @@ class SearchItemScores(ApiModel):
 
 
 class SearchItem(ApiModel):
-    answer_id: int
-    question_id: int
-    question_title: str
-    answer_summary: str
-    topics: list[TopicCard]
+    article_id: int
+    headline: str
+    abstract: str
+    source_domain: str
+    categories: list[TopicCard]
     scores: SearchItemScores
 
 
@@ -61,7 +61,7 @@ class SearchMatchedTopic(ApiModel):
 
 
 class SearchResultSource(ApiModel):
-    answer_id: int
+    article_id: int
     source: str
 
 

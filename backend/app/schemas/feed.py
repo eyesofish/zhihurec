@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from .common import ApiModel, AuthorCard, TopicCard
+from .common import ApiModel, TopicCard
 from .profile import ProfileTopicWeight
 
 FeedExperimentArm = Literal[
@@ -38,12 +38,11 @@ class SponsoredFeedMetadata(ApiModel):
 
 
 class FeedItem(ApiModel):
-    answer_id: int
-    question_id: int
-    question_title: str
-    answer_summary: str
-    author: AuthorCard
-    topics: list[TopicCard]
+    article_id: int
+    headline: str
+    abstract: str
+    source_domain: str
+    categories: list[TopicCard]
     selected_reason: str
     scores: FeedItemScores
     recall_sources: list[str]
@@ -58,7 +57,7 @@ class FeedProfileSummary(ApiModel):
 
 
 class RecallCandidateDebug(ApiModel):
-    answer_id: int
+    article_id: int
     source: str
     base_recall_score: float
 
@@ -66,7 +65,7 @@ class RecallCandidateDebug(ApiModel):
 class SponsoredCandidateDebug(ApiModel):
     campaign_id: int
     creative_id: int
-    answer_id: int
+    article_id: int
     slot_position: int
     expected_spend_micros: int
     sponsored_score: float

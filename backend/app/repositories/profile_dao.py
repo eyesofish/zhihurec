@@ -58,7 +58,7 @@ def profile_from_row(row: dict[str, Any]) -> DebugProfileResponse:
         cold_start_seed_key=row.get("cold_start_seed_key") or "cold_start_default",
         behavior_score=float(row.get("behavior_score") or 0.0),
         topic_weights=topic_weights,
-        recent_clicked_answers=recent_clicks,
+        recent_clicked_articles=recent_clicks,
         recent_queries=recent_queries,
         vector_summary=VectorSummary(
             vector_key_count=len(topic_weights),

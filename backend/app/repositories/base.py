@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from backend.app.schemas.answer import AnswerCardResponse
+from backend.app.schemas.article import ArticleCardResponse
 from backend.app.schemas.event import (
     EventAckResponse,
     RecommendationClickRequest,
@@ -46,6 +46,6 @@ class RuntimeRepository(Protocol):
 
     def list_search_suggestions(self, limit: int) -> SuggestionListResponse: ...
 
-    def get_answer_card(self, answer_id: int) -> AnswerCardResponse: ...
+    def get_article_card(self, article_id: int) -> ArticleCardResponse: ...
 
     def record_tracked_event(self, payload: EventTrackRequest) -> EventTrackResponse: ...

@@ -73,7 +73,7 @@ def parse_recent_clicks(value: Any) -> list[ProfileRecentClick]:
     rows = parse_json(value, [])
     return [
         ProfileRecentClick(
-            answer_id=int(row["answer_id"]),
+            article_id=int(row["answer_id"]),
             click_ts=int(row.get("click_ts") or 0),
         )
         for row in rows
@@ -88,9 +88,7 @@ def parse_recent_queries(value: Any) -> list[ProfileRecentQuery]:
             query_key=str(row["query_key"]),
             query_ts=int(row.get("query_ts") or 0),
             confirmed_ts=(
-                int(row["confirmed_ts"])
-                if row.get("confirmed_ts") is not None
-                else None
+                int(row["confirmed_ts"]) if row.get("confirmed_ts") is not None else None
             ),
         )
         for row in rows
@@ -123,9 +121,9 @@ def selected_reason(is_fallback: bool, sources: set[str]) -> str:
     if is_fallback:
         return "Filled by hot_or_fresh because primary recall was short."
     if "recent_query_topic" in sources:
-        return "Selected because recent query topics boosted this answer."
+        return "Selected because recent query categories boosted this article."
     if "profile_topic" in sources:
-        return "Selected because its topics match the user profile."
+        return "Selected because its categories match the user profile."
     return "Selected by base recall score."
 
 

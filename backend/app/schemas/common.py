@@ -9,11 +9,6 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class AuthorCard(ApiModel):
-    author_id: int
-    display_name: str
-
-
 class TopicCard(ApiModel):
     topic_id: int
     display_name: str

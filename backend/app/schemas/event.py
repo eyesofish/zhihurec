@@ -8,7 +8,7 @@ from .common import ApiModel
 class RecommendationClickRequest(ApiModel):
     event_id: str | None = None
     user_id: int
-    answer_id: int
+    article_id: int
     request_id: str | None = None
     sponsored_delivery_id: str | None = None
     debug: bool = False
@@ -24,7 +24,7 @@ class RecommendationClickRequest(ApiModel):
 class SearchResultClickRequest(ApiModel):
     event_id: str | None = None
     user_id: int
-    answer_id: int
+    article_id: int
     query_key: str
     request_id: str | None = None
     sponsored_delivery_id: str | None = None
@@ -43,8 +43,8 @@ class UpdatedTopicDelta(ApiModel):
     delta: float
 
 
-class RecentClickedAnswer(ApiModel):
-    answer_id: int
+class RecentClickedArticle(ApiModel):
+    article_id: int
     click_ts: int
 
 
@@ -53,7 +53,7 @@ class SearchQueryTopic(ApiModel):
     score: float
 
 
-class AnswerTopic(ApiModel):
+class ArticleTopic(ApiModel):
     topic_id: int
 
 
@@ -64,13 +64,13 @@ class OverlapTopic(ApiModel):
 
 class RecommendationClickDebug(ApiModel):
     updated_topics: list[UpdatedTopicDelta]
-    recent_clicked_answers_tail: list[RecentClickedAnswer]
+    recent_clicked_articles_tail: list[RecentClickedArticle]
     behavior_score: float
 
 
 class SearchResultClickDebug(ApiModel):
     query_topics: list[SearchQueryTopic]
-    answer_topics: list[AnswerTopic]
+    article_topics: list[ArticleTopic]
     overlap_topics: list[OverlapTopic]
     behavior_score: float
 

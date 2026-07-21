@@ -102,11 +102,11 @@ def test_search_numeric_query_key_reaches_repository():
             query_key=payload.query_key or "",
             items=[
                 SearchItem(
-                    answer_id=1,
-                    question_id=2,
-                    question_title="t",
-                    answer_summary="s",
-                    topics=[TopicCard(topic_id=3, display_name="Falafel")],
+                    article_id=1,
+                    headline="t",
+                    abstract="s",
+                    source_domain="example.com",
+                    categories=[TopicCard(topic_id=3, display_name="Falafel")],
                     scores=SearchItemScores(
                         topic_match_score=1.0, hot_backfill_score=0.0, final_score=1.0
                     ),

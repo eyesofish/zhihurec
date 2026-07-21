@@ -140,8 +140,8 @@ class ProfileEventApplier:
         )
 
     def _apply_recommendation_click(self, connection: Any, event: UserEventMessage) -> None:
-        if event.answer_id is None:
-            raise ValueError("recommendation_click event requires answer_id")
+        if event.article_id is None:
+            raise ValueError("recommendation_click event requires article_id")
         self._apply_answer_click(
             connection=connection,
             event=event,
@@ -152,8 +152,8 @@ class ProfileEventApplier:
         )
 
     def _apply_upvote(self, connection: Any, event: UserEventMessage) -> None:
-        if event.answer_id is None:
-            raise ValueError("upvote event requires answer_id")
+        if event.article_id is None:
+            raise ValueError("upvote event requires article_id")
         self._apply_answer_click(
             connection=connection,
             event=event,
@@ -164,22 +164,22 @@ class ProfileEventApplier:
         )
 
     def _apply_search_result_click(self, connection: Any, event: UserEventMessage) -> None:
-        if event.answer_id is None or not event.query_key:
-            raise ValueError("search_result_click event requires answer_id and query_key")
+        if event.article_id is None or not event.query_key:
+            raise ValueError("search_result_click event requires article_id and query_key")
         profile_row = fetch_profile_row(connection, event.user_id, for_update=True)
         sponsored_attribution = (
             load_sponsored_attribution(
                 connection,
                 delivery_id=event.sponsored_delivery_id,
                 user_id=event.user_id,
-                answer_id=event.answer_id,
+                answer_id=event.article_id,
                 for_update=True,
             )
             if event.sponsored_delivery_id
             else None
         )
         query_topics = load_query_topics(connection, event.query_key)
-        answer_topic_ids = load_answer_topic_ids(connection, event.answer_id)
+        answer_topic_ids = load_answer_topic_ids(connection, event.article_id)
         query_topic_ids = {topic.topic_id for topic in query_topics}
         answer_topic_set = set(answer_topic_ids)
         overlap_topic_ids = query_topic_ids & answer_topic_set
@@ -194,7 +194,7 @@ class ProfileEventApplier:
             connection=connection,
             user_id=event.user_id,
             event_type="search_result_click",
-            answer_id=event.answer_id,
+            answer_id=event.article_id,
             query_key=event.query_key,
             request_id=event.request_id,
             surface=event.surface or "search",
@@ -221,7 +221,7 @@ class ProfileEventApplier:
         apply_click_profile_update(
             connection=connection,
             profile_row=profile_row,
-            answer_id=event.answer_id,
+            answer_id=event.article_id,
             event_ts=event.event_ts,
             topic_deltas=topic_deltas,
             behavior_delta=self._settings.search_result_click_behavior_delta,
@@ -238,27 +238,27 @@ class ProfileEventApplier:
         behavior_delta: float,
         topic_delta: float,
     ) -> None:
-        if event.answer_id is None:
-            raise ValueError(f"{event_type} event requires answer_id")
+        if event.article_id is None:
+            raise ValueError(f"{event_type} event requires article_id")
         profile_row = fetch_profile_row(connection, event.user_id, for_update=True)
         sponsored_attribution = (
             load_sponsored_attribution(
                 connection,
                 delivery_id=event.sponsored_delivery_id,
                 user_id=event.user_id,
-                answer_id=event.answer_id,
+                answer_id=event.article_id,
                 for_update=True,
             )
             if event.sponsored_delivery_id
             else None
         )
-        answer_topic_ids = load_answer_topic_ids(connection, event.answer_id)
+        answer_topic_ids = load_answer_topic_ids(connection, event.article_id)
         topic_deltas = {topic_id: topic_delta for topic_id in answer_topic_ids}
         record_click_event(
             connection=connection,
             user_id=event.user_id,
             event_type=event_type,
-            answer_id=event.answer_id,
+            answer_id=event.article_id,
             query_key=event.query_key,
             request_id=event.request_id,
             surface=surface,
@@ -279,7 +279,7 @@ class ProfileEventApplier:
         apply_click_profile_update(
             connection=connection,
             profile_row=profile_row,
-            answer_id=event.answer_id,
+            answer_id=event.article_id,
             event_ts=event.event_ts,
             topic_deltas=topic_deltas,
             behavior_delta=behavior_delta,
@@ -292,10 +292,10 @@ class ProfileEventApplier:
                 connection,
                 delivery_id=event.sponsored_delivery_id,
                 user_id=event.user_id,
-                answer_id=int(event.answer_id),
+                answer_id=int(event.article_id),
                 for_update=True,
             )
-            if event.sponsored_delivery_id and event.answer_id is not None
+            if event.sponsored_delivery_id and event.article_id is not None
             else None
         )
         inserted = record_log_only_event(
@@ -303,7 +303,7 @@ class ProfileEventApplier:
             user_id=event.user_id,
             event_type=event.event_type,
             surface=event.surface or "home_feed",
-            answer_id=event.answer_id,
+            answer_id=event.article_id,
             query_key=event.query_key,
             request_id=event.request_id,
             event_ts=event.event_ts,
@@ -329,12 +329,12 @@ class ProfileEventApplier:
             "downvote": 0.0,
             "feed_impression": None,
         }
-        if event.event_type not in label_by_type or event.answer_id is None:
+        if event.event_type not in label_by_type or event.article_id is None:
             return None
         return TrainingInteractionMessage(
             example_id=event.event_id,
             user_id=event.user_id,
-            answer_id=event.answer_id,
+            article_id=event.article_id,
             query_key=event.query_key,
             request_id=event.request_id,
             surface=event.surface,

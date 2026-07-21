@@ -37,7 +37,7 @@ def _settings(event_mode: str) -> Settings:
 
 def _first_answer_id(mysql_client, user_id: int) -> int:
     feed = mysql_client.get("/feed", params={"user_id": user_id, "page_size": 1}).json()
-    return int(feed["items"][0]["answer_id"])
+    return int(feed["items"][0]["article_id"])
 
 
 def _fetch_count(connection, sql: str, params: tuple[object, ...]) -> int:
@@ -59,7 +59,7 @@ def test_dual_write_stages_raw_event_in_same_database(mysql_client, mysql_demo_u
             user_id=mysql_demo_user,
             event_type="feed_impression",
             surface="feed",
-            answer_id=answer_id,
+            article_id=answer_id,
             request_id="dual-outbox-request",
         )
     )
@@ -96,7 +96,7 @@ def test_kafka_async_ack_requires_durable_raw_outbox(mysql_client, mysql_demo_us
             user_id=mysql_demo_user,
             event_type="recommendation_click",
             surface="feed",
-            answer_id=answer_id,
+            article_id=answer_id,
             request_id="async-outbox-request",
         )
     )
@@ -149,8 +149,8 @@ def test_kafka_async_rejects_conflicting_duplicate_event_id(
             "include_sponsored": "false",
         },
     ).json()
-    first_answer = int(feed["items"][0]["answer_id"])
-    second_answer = int(feed["items"][1]["answer_id"])
+    first_answer = int(feed["items"][0]["article_id"])
+    second_answer = int(feed["items"][1]["article_id"])
     event_id = f"async-conflict-{time.time_ns()}"
 
     repository.record_tracked_event(
@@ -159,7 +159,7 @@ def test_kafka_async_rejects_conflicting_duplicate_event_id(
             user_id=mysql_demo_user,
             event_type="feed_impression",
             surface="feed",
-            answer_id=first_answer,
+            article_id=first_answer,
             request_id="async-conflict-request",
         )
     )
@@ -171,7 +171,7 @@ def test_kafka_async_rejects_conflicting_duplicate_event_id(
                 user_id=mysql_demo_user,
                 event_type="feed_impression",
                 surface="feed",
-                answer_id=second_answer,
+                article_id=second_answer,
                 request_id="async-conflict-request",
             )
         )
@@ -187,7 +187,7 @@ def test_duplicate_consumer_event_backfills_one_training_outbox(
         event_id=f"consumer-outbox-{time.time_ns()}",
         event_type="feed_impression",
         user_id=mysql_demo_user,
-        answer_id=answer_id,
+        article_id=answer_id,
         request_id="consumer-outbox-request",
         surface="feed",
         event_ts=int(time.time()),
@@ -222,7 +222,7 @@ def test_consumer_persists_dwell_duration(mysql_client, mysql_demo_user):
         event_id=f"consumer-dwell-{time.time_ns()}",
         event_type="dwell",
         user_id=mysql_demo_user,
-        answer_id=answer_id,
+        article_id=answer_id,
         request_id="consumer-dwell-request",
         surface="feed",
         dwell_ms=4321,

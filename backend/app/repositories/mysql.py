@@ -65,10 +65,10 @@ from backend.app.repositories.sponsored_dao import (
     record_sponsored_click,
     reserve_sponsored_delivery,
 )
-from backend.app.schemas.answer import AnswerCardResponse
-from backend.app.schemas.common import AuthorCard, TopicCard
+from backend.app.schemas.article import ArticleCardResponse
+from backend.app.schemas.common import TopicCard
 from backend.app.schemas.event import (
-    AnswerTopic,
+    ArticleTopic,
     EventAckResponse,
     OverlapTopic,
     RecommendationClickDebug,
@@ -358,18 +358,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     final_score = round(base_score + topic_match_score + query_recall_boost, 6)
 
                 item = FeedItem(
-                    answer_id=answer_id,
-                    question_id=int(row.get("question_id") or 0),
-                    question_title=row.get("question_title")
-                    or f"Question {row.get('question_id') or 0}",
-                    answer_summary=row.get("answer_summary")
-                    or f"Synthetic answer summary for answer {answer_id}.",
-                    author=AuthorCard(
-                        author_id=int(row.get("author_id") or 0),
-                        display_name=row.get("author_name")
-                        or f"Author {row.get('author_id') or 0}",
-                    ),
-                    topics=topics,
+                    article_id=answer_id,
+                    headline=row.get("headline") or f"Article {answer_id}",
+                    abstract=row.get("abstract") or "",
+                    source_domain=row.get("source_domain") or "unknown-source",
+                    categories=topics,
                     selected_reason=selected_reason(
                         is_fallback=is_fallback,
                         sources=set(sources),
@@ -389,14 +382,14 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     (
                         item,
                         RecallCandidateDebug(
-                            answer_id=answer_id,
+                            article_id=answer_id,
                             source="+".join(sources),
                             base_recall_score=base_score,
                         ),
                     )
                 )
 
-            scored_items.sort(key=lambda pair: (-pair[0].scores.final_score, pair[0].answer_id))
+            scored_items.sort(key=lambda pair: (-pair[0].scores.final_score, pair[0].article_id))
             sponsored_deliveries: list[SponsoredDelivery] = []
             if sponsored_enabled:
                 if not new_feed_request:
@@ -427,7 +420,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     used_answers: set[int] = set()
                     used_campaigns: set[int] = set()
                     candidate_index = 0
-                    organic_answer_ids = {pair[0].answer_id for pair in scored_items}
+                    organic_answer_ids = {pair[0].article_id for pair in scored_items}
                     for slot in slots:
                         while candidate_index < len(sponsored_candidates):
                             sponsored_candidate = sponsored_candidates[candidate_index]
@@ -467,9 +460,9 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 connection,
                 sponsored_deliveries,
             )
-            sponsored_answer_ids = {item.answer_id for item in sponsored_items}
+            sponsored_answer_ids = {item.article_id for item in sponsored_items}
             organic_pairs = [
-                pair for pair in scored_items if pair[0].answer_id not in sponsored_answer_ids
+                pair for pair in scored_items if pair[0].article_id not in sponsored_answer_ids
             ]
             organic_limit = max(0, page_size - len(sponsored_items))
             selected_pairs = organic_pairs[:organic_limit]
@@ -586,13 +579,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 )
                 final_score = round(topic_match_score + hot_backfill_score, 6)
                 item = SearchItem(
-                    answer_id=answer_id,
-                    question_id=int(row.get("question_id") or 0),
-                    question_title=row.get("question_title")
-                    or f"Question {row.get('question_id') or 0}",
-                    answer_summary=row.get("answer_summary")
-                    or f"Synthetic answer summary for answer {answer_id}.",
-                    topics=topics_by_answer.get(answer_id, []),
+                    article_id=answer_id,
+                    headline=row.get("headline") or f"Article {answer_id}",
+                    abstract=row.get("abstract") or "",
+                    source_domain=row.get("source_domain") or "unknown-source",
+                    categories=topics_by_answer.get(answer_id, []),
                     scores=SearchItemScores(
                         topic_match_score=topic_match_score,
                         hot_backfill_score=hot_backfill_score,
@@ -603,12 +594,12 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     (
                         is_fallback,
                         item,
-                        SearchResultSource(answer_id=answer_id, source=candidate["source"]),
+                        SearchResultSource(article_id=answer_id, source=candidate["source"]),
                     )
                 )
 
             scored_items.sort(
-                key=lambda pair: (pair[0], -pair[1].scores.final_score, pair[1].answer_id)
+                key=lambda pair: (pair[0], -pair[1].scores.final_score, pair[1].article_id)
             )
             selected = scored_items[: payload.page_size]
             response = SearchResponse(
@@ -639,13 +630,13 @@ class MysqlRuntimeRepository(RuntimeRepository):
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
             user_id=payload.user_id,
-            answer_id=payload.answer_id,
+            answer_id=payload.article_id,
         )
         event = self._event_message(
             event_type="recommendation_click",
             user_id=payload.user_id,
             event_id=payload.event_id,
-            answer_id=payload.answer_id,
+            answer_id=payload.article_id,
             request_id=payload.request_id,
             sponsored_delivery_id=payload.sponsored_delivery_id,
             campaign_id=(
@@ -680,11 +671,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     connection,
                     delivery_id=payload.sponsored_delivery_id,
                     user_id=payload.user_id,
-                    answer_id=payload.answer_id,
+                    answer_id=payload.article_id,
                     for_update=True,
                 )
             profile_row = fetch_profile_row(connection, payload.user_id, for_update=True)
-            answer_topic_ids = load_answer_topic_ids(connection, payload.answer_id)
+            answer_topic_ids = load_answer_topic_ids(connection, payload.article_id)
             topic_deltas = {
                 topic_id: self._settings.recommendation_click_topic_delta
                 for topic_id in answer_topic_ids
@@ -693,7 +684,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 connection=connection,
                 user_id=payload.user_id,
                 event_type="recommendation_click",
-                answer_id=payload.answer_id,
+                answer_id=payload.article_id,
                 query_key=None,
                 request_id=payload.request_id,
                 surface="feed",
@@ -713,7 +704,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
             update = apply_click_profile_update(
                 connection=connection,
                 profile_row=profile_row,
-                answer_id=payload.answer_id,
+                answer_id=payload.article_id,
                 event_ts=event_ts,
                 topic_deltas=topic_deltas,
                 behavior_delta=self._settings.recommendation_click_behavior_delta,
@@ -724,7 +715,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 event_type="recommendation_click",
                 debug=RecommendationClickDebug(
                     updated_topics=topic_delta_models(topic_deltas),
-                    recent_clicked_answers_tail=update["recent_clicked_answers"],
+                    recent_clicked_articles_tail=update["recent_clicked_answers"],
                     behavior_score=update["behavior_score"],
                 )
                 if payload.debug
@@ -747,13 +738,13 @@ class MysqlRuntimeRepository(RuntimeRepository):
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
             user_id=payload.user_id,
-            answer_id=payload.answer_id,
+            answer_id=payload.article_id,
         )
         event = self._event_message(
             event_type="search_result_click",
             user_id=payload.user_id,
             event_id=payload.event_id,
-            answer_id=payload.answer_id,
+            answer_id=payload.article_id,
             query_key=query_key,
             request_id=payload.request_id,
             sponsored_delivery_id=payload.sponsored_delivery_id,
@@ -789,12 +780,12 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     connection,
                     delivery_id=payload.sponsored_delivery_id,
                     user_id=payload.user_id,
-                    answer_id=payload.answer_id,
+                    answer_id=payload.article_id,
                     for_update=True,
                 )
             profile_row = fetch_profile_row(connection, payload.user_id, for_update=True)
             query_topics: list[SearchQueryTopic] = load_query_topics(connection, query_key)
-            answer_topic_ids = load_answer_topic_ids(connection, payload.answer_id)
+            answer_topic_ids = load_answer_topic_ids(connection, payload.article_id)
             query_topic_ids = {topic.topic_id for topic in query_topics}
             answer_topic_set = set(answer_topic_ids)
             overlap_topic_ids = query_topic_ids & answer_topic_set
@@ -809,7 +800,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 connection=connection,
                 user_id=payload.user_id,
                 event_type="search_result_click",
-                answer_id=payload.answer_id,
+                answer_id=payload.article_id,
                 query_key=query_key,
                 request_id=payload.request_id,
                 surface="search",
@@ -835,7 +826,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
             update = apply_click_profile_update(
                 connection=connection,
                 profile_row=profile_row,
-                answer_id=payload.answer_id,
+                answer_id=payload.article_id,
                 event_ts=event_ts,
                 topic_deltas=topic_deltas,
                 behavior_delta=self._settings.search_result_click_behavior_delta,
@@ -846,7 +837,9 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 event_type="search_result_click",
                 debug=SearchResultClickDebug(
                     query_topics=query_topics,
-                    answer_topics=[AnswerTopic(topic_id=topic_id) for topic_id in answer_topic_ids],
+                    article_topics=[
+                        ArticleTopic(topic_id=topic_id) for topic_id in answer_topic_ids
+                    ],
                     overlap_topics=[
                         OverlapTopic(topic_id=topic_id, boost_type="strong_confirm")
                         for topic_id in sorted(overlap_topic_ids)
@@ -940,43 +933,36 @@ class MysqlRuntimeRepository(RuntimeRepository):
         ]
         return SuggestionListResponse(items=items)
 
-    def get_answer_card(self, answer_id: int) -> AnswerCardResponse:
+    def get_article_card(self, article_id: int) -> ArticleCardResponse:
         connection = self._connection_pool.connect()
         try:
-            answer_rows = load_answer_rows(connection, [answer_id])
-            row = answer_rows.get(answer_id)
+            answer_rows = load_answer_rows(connection, [article_id])
+            row = answer_rows.get(article_id)
             if row is None:
-                raise LookupError(f"answer not found: {answer_id}")
-            topics_by_answer = load_topics_by_answer(connection, [answer_id])
+                raise LookupError(f"article not found: {article_id}")
+            topics_by_answer = load_topics_by_answer(connection, [article_id])
         finally:
             connection.close()
 
-        topics: list[TopicCard] = topics_by_answer.get(answer_id, [])
-        question_id = int(row.get("question_id") or 0)
-        author_id = int(row.get("author_id") or 0)
-        return AnswerCardResponse(
-            answer_id=answer_id,
-            question_id=question_id,
-            question_title=row.get("question_title") or f"Question {question_id}",
-            answer_summary=row.get("answer_summary")
-            or f"Synthetic answer summary for answer {answer_id}.",
-            author=AuthorCard(
-                author_id=author_id,
-                display_name=row.get("author_name") or f"Author {author_id}",
-            ),
-            topics=topics,
+        categories: list[TopicCard] = topics_by_answer.get(article_id, [])
+        return ArticleCardResponse(
+            article_id=article_id,
+            headline=row.get("headline") or f"Article {article_id}",
+            abstract=row.get("abstract") or "",
+            source_domain=row.get("source_domain") or "unknown-source",
+            categories=categories,
         )
 
     def record_tracked_event(self, payload: EventTrackRequest) -> EventTrackResponse:
         # Delegate event types that already have rich profile-update logic.
         if payload.event_type == "recommendation_click":
-            if payload.answer_id is None:
-                raise ValueError("recommendation_click requires answer_id")
+            if payload.article_id is None:
+                raise ValueError("recommendation_click requires article_id")
             ack = self.record_recommendation_click(
                 RecommendationClickRequest(
                     event_id=payload.event_id,
                     user_id=payload.user_id,
-                    answer_id=payload.answer_id,
+                    article_id=payload.article_id,
                     request_id=payload.request_id,
                     sponsored_delivery_id=payload.sponsored_delivery_id,
                     debug=payload.debug,
@@ -997,13 +983,13 @@ class MysqlRuntimeRepository(RuntimeRepository):
             )
 
         if payload.event_type == "search_result_click":
-            if payload.answer_id is None or not payload.query_key:
-                raise ValueError("search_result_click requires answer_id and query_key")
+            if payload.article_id is None or not payload.query_key:
+                raise ValueError("search_result_click requires article_id and query_key")
             ack = self.record_search_result_click(
                 SearchResultClickRequest(
                     event_id=payload.event_id,
                     user_id=payload.user_id,
-                    answer_id=payload.answer_id,
+                    article_id=payload.article_id,
                     query_key=payload.query_key,
                     request_id=payload.request_id,
                     sponsored_delivery_id=payload.sponsored_delivery_id,
@@ -1023,8 +1009,8 @@ class MysqlRuntimeRepository(RuntimeRepository):
             )
 
         if payload.event_type == "upvote":
-            if payload.answer_id is None:
-                raise ValueError("upvote requires answer_id")
+            if payload.article_id is None:
+                raise ValueError("upvote requires article_id")
             # Apply the same positive profile update as a recommendation click,
             # but stamp the user_event row with event_type='upvote' for analytics distinction.
             event_ts = (
@@ -1033,13 +1019,13 @@ class MysqlRuntimeRepository(RuntimeRepository):
             sponsored_attribution = self._load_sponsored_event_attribution(
                 delivery_id=payload.sponsored_delivery_id,
                 user_id=payload.user_id,
-                answer_id=payload.answer_id,
+                answer_id=payload.article_id,
             )
             event = self._event_message(
                 event_type="upvote",
                 user_id=payload.user_id,
                 event_id=payload.event_id,
-                answer_id=payload.answer_id,
+                answer_id=payload.article_id,
                 query_key=payload.query_key,
                 request_id=payload.request_id,
                 sponsored_delivery_id=payload.sponsored_delivery_id,
@@ -1082,11 +1068,11 @@ class MysqlRuntimeRepository(RuntimeRepository):
                         connection,
                         delivery_id=payload.sponsored_delivery_id,
                         user_id=payload.user_id,
-                        answer_id=payload.answer_id,
+                        answer_id=payload.article_id,
                         for_update=True,
                     )
                 profile_row = fetch_profile_row(connection, payload.user_id, for_update=True)
-                answer_topic_ids = load_answer_topic_ids(connection, payload.answer_id)
+                answer_topic_ids = load_answer_topic_ids(connection, payload.article_id)
                 topic_deltas = {
                     topic_id: self._settings.recommendation_click_topic_delta
                     for topic_id in answer_topic_ids
@@ -1095,7 +1081,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     connection=connection,
                     user_id=payload.user_id,
                     event_type="upvote",
-                    answer_id=payload.answer_id,
+                    answer_id=payload.article_id,
                     query_key=payload.query_key,
                     request_id=payload.request_id,
                     surface=payload.surface or "home_feed",
@@ -1115,7 +1101,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 update = apply_click_profile_update(
                     connection=connection,
                     profile_row=profile_row,
-                    answer_id=payload.answer_id,
+                    answer_id=payload.article_id,
                     event_ts=event_ts,
                     topic_deltas=topic_deltas,
                     behavior_delta=self._settings.recommendation_click_behavior_delta,
@@ -1139,18 +1125,18 @@ class MysqlRuntimeRepository(RuntimeRepository):
         event_ts = (
             payload.replay_event_ts if payload.replay_event_ts is not None else int(time.time())
         )
-        if payload.answer_id is None:
-            raise ValueError(f"{payload.event_type} requires answer_id")
+        if payload.article_id is None:
+            raise ValueError(f"{payload.event_type} requires article_id")
         sponsored_attribution = self._load_sponsored_event_attribution(
             delivery_id=payload.sponsored_delivery_id,
             user_id=payload.user_id,
-            answer_id=payload.answer_id,
+            answer_id=payload.article_id,
         )
         event = self._event_message(
             event_type=cast(UserEventType, payload.event_type),
             user_id=payload.user_id,
             event_id=payload.event_id,
-            answer_id=payload.answer_id,
+            answer_id=payload.article_id,
             query_key=payload.query_key,
             request_id=payload.request_id,
             sponsored_delivery_id=payload.sponsored_delivery_id,
@@ -1193,7 +1179,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                     connection,
                     delivery_id=payload.sponsored_delivery_id,
                     user_id=payload.user_id,
-                    answer_id=payload.answer_id,
+                    answer_id=payload.article_id,
                     for_update=True,
                 )
             inserted = record_log_only_event(
@@ -1201,7 +1187,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 user_id=payload.user_id,
                 event_type=payload.event_type,
                 surface=payload.surface or "home_feed",
-                answer_id=payload.answer_id,
+                answer_id=payload.article_id,
                 query_key=payload.query_key,
                 request_id=payload.request_id,
                 event_ts=event_ts,
@@ -1299,22 +1285,15 @@ class MysqlRuntimeRepository(RuntimeRepository):
         for delivery in deliveries:
             row = answer_rows.get(delivery.answer_id)
             if row is None:
-                raise RuntimeError(f"sponsored creative answer is missing: {delivery.answer_id}")
+                raise RuntimeError(f"sponsored creative article is missing: {delivery.answer_id}")
             topics = topics_by_answer.get(delivery.answer_id, [])
             items.append(
                 FeedItem(
-                    answer_id=delivery.answer_id,
-                    question_id=int(row.get("question_id") or 0),
-                    question_title=row.get("question_title")
-                    or f"Question {row.get('question_id') or 0}",
-                    answer_summary=row.get("answer_summary")
-                    or f"Synthetic answer summary for answer {delivery.answer_id}.",
-                    author=AuthorCard(
-                        author_id=int(row.get("author_id") or 0),
-                        display_name=row.get("author_name")
-                        or f"Author {row.get('author_id') or 0}",
-                    ),
-                    topics=topics,
+                    article_id=delivery.answer_id,
+                    headline=row.get("headline") or f"Article {delivery.answer_id}",
+                    abstract=row.get("abstract") or "",
+                    source_domain=row.get("source_domain") or "unknown-source",
+                    categories=topics,
                     selected_reason=(
                         f"Sponsored candidate from {delivery.campaign_name}; "
                         "eligible by topic, budget, pacing, and frequency cap."
@@ -1342,7 +1321,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
                 SponsoredCandidateDebug(
                     campaign_id=delivery.campaign_id,
                     creative_id=delivery.creative_id,
-                    answer_id=delivery.answer_id,
+                    article_id=delivery.answer_id,
                     slot_position=delivery.slot_position,
                     expected_spend_micros=delivery.expected_spend_micros,
                     sponsored_score=round(delivery.sponsored_score, 6),
@@ -1370,7 +1349,7 @@ class MysqlRuntimeRepository(RuntimeRepository):
         message_values: dict[str, Any] = {
             "event_type": event_type,
             "user_id": user_id,
-            "answer_id": answer_id,
+            "article_id": answer_id,
             "query_key": query_key,
             "query_text": query_text,
             "request_id": request_id,

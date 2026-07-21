@@ -52,11 +52,11 @@ def test_recommendation_click_increases_behavior_score(mysql_client, mysql_demo_
     base = float(before["behavior_score"])
 
     feed = mysql_client.get("/feed", params={"user_id": mysql_demo_user, "page_size": 1}).json()
-    answer_id = feed["items"][0]["answer_id"]
+    answer_id = feed["items"][0]["article_id"]
 
     ack = mysql_client.post(
         "/event/recommendation_click",
-        json={"user_id": mysql_demo_user, "answer_id": answer_id, "debug": True},
+        json={"user_id": mysql_demo_user, "article_id": answer_id, "debug": True},
     )
     assert ack.status_code == 200
     assert ack.json()["ok"] is True
@@ -64,7 +64,7 @@ def test_recommendation_click_increases_behavior_score(mysql_client, mysql_demo_
     after = mysql_client.get("/debug/profile", params={"user_id": mysql_demo_user}).json()
     delta = float(after["behavior_score"]) - base
     assert delta == pytest.approx(settings.recommendation_click_behavior_delta, abs=1e-3)
-    assert after["recent_clicked_answers"][0]["answer_id"] == answer_id
+    assert after["recent_clicked_articles"][0]["article_id"] == answer_id
 
 
 def test_search_then_feed_shows_recall_candidates(mysql_client, mysql_demo_user):
@@ -119,7 +119,7 @@ def test_concurrent_clicks_do_not_lose_profile_updates(mysql_client, mysql_demo_
         "/feed",
         params={"user_id": mysql_demo_user, "page_size": 2},
     ).json()
-    answer_ids = [int(item["answer_id"]) for item in feed["items"]]
+    answer_ids = [int(item["article_id"]) for item in feed["items"]]
     assert len(answer_ids) == 2
 
     barrier = Barrier(2)
@@ -129,7 +129,7 @@ def test_concurrent_clicks_do_not_lose_profile_updates(mysql_client, mysql_demo_
         with TestClient(create_app()) as client:
             response = client.post(
                 "/event/recommendation_click",
-                json={"user_id": mysql_demo_user, "answer_id": answer_id},
+                json={"user_id": mysql_demo_user, "article_id": answer_id},
             )
         return response.status_code
 
@@ -140,7 +140,7 @@ def test_concurrent_clicks_do_not_lose_profile_updates(mysql_client, mysql_demo_
     after = mysql_client.get("/debug/profile", params={"user_id": mysql_demo_user}).json()
     expected_delta = 2 * settings.recommendation_click_behavior_delta
     assert float(after["behavior_score"]) - base_score == pytest.approx(expected_delta, abs=1e-3)
-    recent_ids = {int(row["answer_id"]) for row in after["recent_clicked_answers"]}
+    recent_ids = {int(row["article_id"]) for row in after["recent_clicked_articles"]}
     assert set(answer_ids).issubset(recent_ids)
 
 
@@ -161,7 +161,7 @@ def test_concurrent_duplicate_click_is_one_idempotent_update(
                 "page_size": 1,
                 "include_sponsored": "false",
             },
-        ).json()["items"][0]["answer_id"]
+        ).json()["items"][0]["article_id"]
     )
     event_id = f"duplicate-click-{mysql_demo_user}-{answer_id}"
     barrier = Barrier(2)
@@ -176,7 +176,7 @@ def test_concurrent_duplicate_click_is_one_idempotent_update(
                     "user_id": mysql_demo_user,
                     "event_type": "recommendation_click",
                     "surface": "feed",
-                    "answer_id": answer_id,
+                    "article_id": answer_id,
                     "request_id": "duplicate-click-request",
                 },
             )

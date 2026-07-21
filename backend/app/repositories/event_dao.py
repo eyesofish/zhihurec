@@ -10,7 +10,7 @@ from backend.app.repositories._utils import (
     query_tokens,
     updated_topic_weights,
 )
-from backend.app.schemas.event import RecentClickedAnswer
+from backend.app.schemas.event import RecentClickedArticle
 from backend.app.schemas.profile import ProfileTopicWeight
 
 
@@ -340,8 +340,8 @@ def apply_click_profile_update(
             for row in next_topic_weights
         ],
         "recent_clicked_answers": [
-            RecentClickedAnswer(
-                answer_id=int(row["answer_id"]),
+            RecentClickedArticle(
+                article_id=int(row["answer_id"]),
                 click_ts=int(row.get("click_ts") or 0),
             )
             for row in next_recent_clicks

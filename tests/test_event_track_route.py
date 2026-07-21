@@ -19,7 +19,7 @@ pytestmark = [
 
 def _first_feed_answer_id(client, user_id: int) -> int:
     feed = client.get("/feed", params={"user_id": user_id, "page_size": 1}).json()
-    return int(feed["items"][0]["answer_id"])
+    return int(feed["items"][0]["article_id"])
 
 
 def test_event_track_log_only_event_acks_without_profile_change(mysql_client, mysql_demo_user):
@@ -33,7 +33,7 @@ def test_event_track_log_only_event_acks_without_profile_change(mysql_client, my
             "user_id": mysql_demo_user,
             "event_type": "feed_impression",
             "surface": "home_feed",
-            "answer_id": answer_id,
+            "article_id": answer_id,
         },
     )
     assert r.status_code == 200, r.text
@@ -58,7 +58,7 @@ def test_event_track_impression_event_id_is_idempotent(mysql_client, mysql_demo_
         "user_id": mysql_demo_user,
         "event_type": "feed_impression",
         "surface": "home_feed",
-        "answer_id": answer_id,
+        "article_id": answer_id,
         "request_id": "test-request",
     }
 
@@ -93,7 +93,7 @@ def test_event_track_upvote_mutates_behavior_score(mysql_client, mysql_demo_user
             "user_id": mysql_demo_user,
             "event_type": "upvote",
             "surface": "home_feed",
-            "answer_id": answer_id,
+            "article_id": answer_id,
         },
     )
     assert r.status_code == 200, r.text
@@ -107,20 +107,20 @@ def test_event_track_upvote_mutates_behavior_score(mysql_client, mysql_demo_user
     )
 
     after = mysql_client.get("/debug/profile", params={"user_id": mysql_demo_user}).json()
-    assert after["recent_clicked_answers"][0]["answer_id"] == answer_id
+    assert after["recent_clicked_articles"][0]["article_id"] == answer_id
 
 
-def test_event_track_legacy_recommendation_click_route_still_works(mysql_client, mysql_demo_user):
+def test_recommendation_click_route_uses_article_id(mysql_client, mysql_demo_user):
     answer_id = _first_feed_answer_id(mysql_client, mysql_demo_user)
     r = mysql_client.post(
         "/event/recommendation_click",
-        json={"user_id": mysql_demo_user, "answer_id": answer_id, "debug": True},
+        json={"user_id": mysql_demo_user, "article_id": answer_id, "debug": True},
     )
     assert r.status_code == 200
     assert r.json()["ok"] is True
 
 
-def test_event_track_feed_impression_requires_answer_id(mysql_client, mysql_demo_user):
+def test_event_track_feed_impression_requires_article_id(mysql_client, mysql_demo_user):
     response = mysql_client.post(
         "/event/track",
         json={
@@ -139,7 +139,7 @@ def test_event_track_replay_timestamp_requires_debug(unwired_client):
             "user_id": 7248,
             "event_type": "feed_impression",
             "surface": "feed",
-            "answer_id": 1,
+            "article_id": 1,
             "replay_event_ts": 100,
         },
     )
@@ -156,7 +156,7 @@ def test_event_track_duplicate_upvote_is_idempotent(mysql_client, mysql_demo_use
         "user_id": mysql_demo_user,
         "event_type": "upvote",
         "surface": "feed",
-        "answer_id": answer_id,
+        "article_id": answer_id,
     }
 
     first = mysql_client.post("/event/track", json=payload)
@@ -184,7 +184,7 @@ def test_event_track_persists_dwell_duration(mysql_client, mysql_demo_user):
             "user_id": mysql_demo_user,
             "event_type": "dwell",
             "surface": "feed",
-            "answer_id": answer_id,
+            "article_id": answer_id,
             "dwell_ms": 4321,
         },
     )
@@ -215,7 +215,7 @@ def test_event_id_conflicting_payload_returns_409(mysql_client, mysql_demo_user)
         },
     ).json()
     second_answer = next(
-        int(item["answer_id"]) for item in feed["items"] if int(item["answer_id"]) != first_answer
+        int(item["article_id"]) for item in feed["items"] if int(item["article_id"]) != first_answer
     )
     event_id = f"conflicting-event-{mysql_demo_user}"
 
@@ -226,7 +226,7 @@ def test_event_id_conflicting_payload_returns_409(mysql_client, mysql_demo_user)
             "user_id": mysql_demo_user,
             "event_type": "feed_impression",
             "surface": "feed",
-            "answer_id": first_answer,
+            "article_id": first_answer,
         },
     )
     conflict = mysql_client.post(
@@ -236,7 +236,7 @@ def test_event_id_conflicting_payload_returns_409(mysql_client, mysql_demo_user)
             "user_id": mysql_demo_user,
             "event_type": "feed_impression",
             "surface": "feed",
-            "answer_id": second_answer,
+            "article_id": second_answer,
         },
     )
 

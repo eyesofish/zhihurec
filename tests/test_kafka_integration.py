@@ -39,9 +39,9 @@ def test_raw_event_reaches_mysql_and_training_topic(mysql_client, mysql_demo_use
     from confluent_kafka.admin import AdminClient, NewTopic
 
     suffix = uuid.uuid4().hex[:10]
-    raw_topic = f"zhihurec.test.raw.{suffix}"
-    training_topic = f"zhihurec.test.training.{suffix}"
-    dlq_topic = f"zhihurec.test.dlq.{suffix}"
+    raw_topic = f"newsrec.test.raw.{suffix}"
+    training_topic = f"newsrec.test.training.{suffix}"
+    dlq_topic = f"newsrec.test.dlq.{suffix}"
     bootstrap = (
         os.environ.get("NEWSREC_KAFKA_BOOTSTRAP_SERVERS")
         or os.environ["ZHIHUREC_KAFKA_BOOTSTRAP_SERVERS"]
@@ -63,7 +63,7 @@ def test_raw_event_reaches_mysql_and_training_topic(mysql_client, mysql_demo_use
         ),
         event_mode="kafka_async",
         kafka_bootstrap_servers=bootstrap,
-        kafka_profile_group_id=f"zhihurec-test-profile-{suffix}",
+        kafka_profile_group_id=f"newsrec-test-profile-{suffix}",
         kafka_raw_events_topic=raw_topic,
         kafka_training_topic=training_topic,
         kafka_dlq_topic=dlq_topic,
@@ -77,12 +77,12 @@ def test_raw_event_reaches_mysql_and_training_topic(mysql_client, mysql_demo_use
             "include_sponsored": "false",
         },
     ).json()
-    answer_id = int(feed["items"][0]["answer_id"])
+    answer_id = int(feed["items"][0]["article_id"])
     event = UserEventMessage(
         event_id=f"kafka-integration-{suffix}",
         event_type="feed_impression",
         user_id=mysql_demo_user,
-        answer_id=answer_id,
+        article_id=answer_id,
         request_id=f"kafka-request-{suffix}",
         surface="feed",
         event_ts=int(time.time()),
@@ -112,7 +112,7 @@ def test_raw_event_reaches_mysql_and_training_topic(mysql_client, mysql_demo_use
     consumer = Consumer(
         {
             "bootstrap.servers": bootstrap,
-            "group.id": f"zhihurec-test-training-{suffix}",
+            "group.id": f"newsrec-test-training-{suffix}",
             "auto.offset.reset": "earliest",
             "enable.auto.commit": False,
         }
@@ -129,7 +129,7 @@ def test_raw_event_reaches_mysql_and_training_topic(mysql_client, mysql_demo_use
         training = TrainingInteractionMessage.model_validate_json(message.value())
         assert training.example_id == event.event_id
         assert training.request_id == event.request_id
-        assert training.answer_id == answer_id
+        assert training.article_id == answer_id
         assert training.label is None
     finally:
         consumer.close()

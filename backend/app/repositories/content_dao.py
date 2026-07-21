@@ -208,7 +208,7 @@ def load_answer_rows(connection: Any, answer_ids: list[int]) -> dict[int, dict[s
               a.answer_id,
               a.question_id,
               a.author_id,
-              a.display_summary AS answer_summary,
+              a.display_summary AS abstract,
               a.hot_score,
               a.click_count,
               a.impression_count,
@@ -219,8 +219,8 @@ def load_answer_rows(connection: Any, answer_ids: list[int]) -> dict[int, dict[s
               a.create_ts,
               a.likes_count,
               a.collection_count,
-              q.display_title AS question_title,
-              au.display_name AS author_name,
+              q.display_title AS headline,
+              au.display_name AS source_domain,
               au.is_excellent_answerer,
               au.follower_count AS author_follower_count
             FROM answer a
