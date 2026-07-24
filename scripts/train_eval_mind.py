@@ -27,6 +27,17 @@ from backend.app.repositories.ranker import (  # noqa: E402
     RANKER_FEATURE_COLUMNS,
 )
 
+COMPARISON_RANKING_METRICS = (
+    "recall@5",
+    "recall@10",
+    "ndcg@5",
+    "ndcg@10",
+    "mrr",
+    "category_diversity@10",
+)
+PAIRED_BOOTSTRAP_ITERATIONS = 2_000
+PAIRED_BOOTSTRAP_SEED = 42
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -44,6 +55,33 @@ def _request_split(
     if train.empty or test.empty:
         raise RuntimeError("Global chronological request split produced an empty partition")
     return train, test, cutoff_ts
+
+
+def _request_group_sizes(frame: pd.DataFrame) -> list[int]:
+    request_ids = frame["request_id"].astype(str).tolist()
+    if not request_ids:
+        return []
+
+    group_sizes: list[int] = []
+    completed_requests: set[str] = set()
+    current_request = request_ids[0]
+    current_size = 0
+    for request_id in request_ids:
+        if request_id != current_request:
+            completed_requests.add(current_request)
+            if request_id in completed_requests:
+                raise ValueError(
+                    f"Request {request_id!r} appears in multiple non-contiguous groups"
+                )
+            group_sizes.append(current_size)
+            current_request = request_id
+            current_size = 0
+        current_size += 1
+    group_sizes.append(current_size)
+
+    if sum(group_sizes) != len(frame):
+        raise RuntimeError("Request group sizes do not preserve the frame row count")
+    return group_sizes
 
 
 def _read_impressions(
@@ -342,6 +380,182 @@ def mean(values: list[int]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _request_ranking_metric_frame(
+    frame: pd.DataFrame,
+    scores: np.ndarray,
+    article_category: dict[int, int],
+) -> pd.DataFrame:
+    scored = frame[["request_id", "article_id", "label"]].copy()
+    scored["score"] = scores
+    records: list[dict[str, float | str]] = []
+    for request_id, rows in scored.groupby("request_id", sort=False):
+        positives = int(rows["label"].sum())
+        if positives <= 0:
+            continue
+        ordered = rows.sort_values(["score", "article_id"], ascending=[False, True])
+        labels = ordered["label"].astype(int).tolist()
+        record: dict[str, float | str] = {"request_id": str(request_id)}
+        for k in (5, 10):
+            top = labels[:k]
+            record[f"recall@{k}"] = sum(top) / positives
+            dcg = sum(label / math.log2(index + 2) for index, label in enumerate(top))
+            ideal = sum(1.0 / math.log2(index + 2) for index in range(min(positives, k)))
+            record[f"ndcg@{k}"] = dcg / ideal if ideal else 0.0
+        first_positive = next(
+            (index + 1 for index, label in enumerate(labels) if label),
+            None,
+        )
+        record["mrr"] = 1.0 / first_positive if first_positive else 0.0
+        record["category_diversity@10"] = float(
+            len(
+                {
+                    article_category.get(int(article_id))
+                    for article_id in ordered["article_id"].head(10)
+                }
+            )
+        )
+        records.append(record)
+    return pd.DataFrame.from_records(
+        records,
+        columns=["request_id", *COMPARISON_RANKING_METRICS],
+    )
+
+
+def _paired_bootstrap_confidence_intervals(
+    pointwise: pd.DataFrame,
+    lambdarank: pd.DataFrame,
+    *,
+    iterations: int = PAIRED_BOOTSTRAP_ITERATIONS,
+    confidence_level: float = 0.95,
+    seed: int = PAIRED_BOOTSTRAP_SEED,
+) -> dict[str, Any]:
+    if iterations <= 0:
+        raise ValueError("Bootstrap iterations must be positive")
+    if not 0.0 < confidence_level < 1.0:
+        raise ValueError("Bootstrap confidence level must be between zero and one")
+
+    paired = pointwise.merge(
+        lambdarank,
+        on="request_id",
+        how="inner",
+        suffixes=("_pointwise", "_lambdarank"),
+        validate="one_to_one",
+    )
+    if len(paired) != len(pointwise) or len(paired) != len(lambdarank):
+        raise RuntimeError("Objective comparison request metrics are not fully paired")
+    if paired.empty:
+        raise RuntimeError("Objective comparison has no request metrics to bootstrap")
+
+    deltas = np.column_stack(
+        [
+            paired[f"{metric}_lambdarank"].to_numpy(dtype=np.float64)
+            - paired[f"{metric}_pointwise"].to_numpy(dtype=np.float64)
+            for metric in COMPARISON_RANKING_METRICS
+        ]
+    )
+    bootstrap_means = np.empty((iterations, len(COMPARISON_RANKING_METRICS)))
+    random = np.random.default_rng(seed)
+    batch_size = 64
+    for start in range(0, iterations, batch_size):
+        stop = min(start + batch_size, iterations)
+        indices = random.integers(
+            0,
+            len(paired),
+            size=(stop - start, len(paired)),
+        )
+        bootstrap_means[start:stop] = deltas[indices].mean(axis=1)
+
+    alpha = (1.0 - confidence_level) / 2.0
+    lower_bounds, upper_bounds = np.quantile(
+        bootstrap_means,
+        [alpha, 1.0 - alpha],
+        axis=0,
+    )
+    delta_intervals: dict[str, dict[str, float | str]] = {}
+    for index, metric in enumerate(COMPARISON_RANKING_METRICS):
+        lower_bound = float(lower_bounds[index])
+        upper_bound = float(upper_bounds[index])
+        stable_direction = (
+            "increase"
+            if lower_bound > 0.0
+            else "decrease"
+            if upper_bound < 0.0
+            else "not_established"
+        )
+        delta_intervals[metric] = {
+            "mean_delta": round(float(deltas[:, index].mean()), 6),
+            "lower_bound": round(lower_bound, 6),
+            "upper_bound": round(upper_bound, 6),
+            "stable_direction": stable_direction,
+        }
+    return {
+        "method": "paired nonparametric bootstrap over requests",
+        "request_pairs": len(paired),
+        "iterations": iterations,
+        "confidence_level": confidence_level,
+        "seed": seed,
+        "delta_intervals": delta_intervals,
+    }
+
+
+def _comparison_interpretation(
+    metric_deltas: dict[str, float],
+    bootstrap: dict[str, Any],
+) -> dict[str, Any]:
+    intervals = bootstrap["delta_intervals"]
+    primary = intervals["ndcg@10"]
+    primary_direction = primary["stable_direction"]
+    if primary_direction == "increase":
+        conclusion = (
+            "LambdaRank established a positive paired NDCG@10 delta for this fixed "
+            "dataset, feature schema, sample, and hyperparameter configuration."
+        )
+    elif primary_direction == "decrease":
+        conclusion = (
+            "LambdaRank established a negative paired NDCG@10 delta for this fixed "
+            "dataset, feature schema, sample, and hyperparameter configuration."
+        )
+    else:
+        conclusion = (
+            "The paired NDCG@10 interval includes zero, so this experiment does not "
+            "establish a stable winner under the fixed configuration."
+        )
+    tradeoffs = {
+        metric: {
+            "observed_delta": metric_deltas[metric],
+            "observed_direction": (
+                "increase"
+                if metric_deltas[metric] > 0.0
+                else "decrease"
+                if metric_deltas[metric] < 0.0
+                else "tie"
+            ),
+            "paired_interval": [
+                intervals[metric]["lower_bound"],
+                intervals[metric]["upper_bound"],
+            ],
+            "stable_direction": intervals[metric]["stable_direction"],
+        }
+        for metric in COMPARISON_RANKING_METRICS
+        if metric != "ndcg@10"
+    }
+    return {
+        "primary_metric": "ndcg@10",
+        "primary_observed_delta": metric_deltas["ndcg@10"],
+        "primary_paired_interval": [
+            primary["lower_bound"],
+            primary["upper_bound"],
+        ],
+        "primary_stable_direction": primary_direction,
+        "tradeoffs": tradeoffs,
+        "conclusion": conclusion,
+        "deployment_implication": (
+            "Keep the online artifact unchanged; these scores are offline ranking evidence "
+            "and LambdaRank output is not a calibrated click probability."
+        ),
+    }
+
+
 def _candidate_recall(
     frame: pd.DataFrame,
     model: Any,
@@ -407,6 +621,16 @@ def main() -> None:
     parser.add_argument("--factors", type=int, default=32)
     parser.add_argument("--als-iterations", type=int, default=10)
     parser.add_argument("--lgb-estimators", type=int, default=120)
+    parser.add_argument(
+        "--compare-lgb-objectives",
+        action="store_true",
+        help="Compare the pointwise classifier with LambdaRank on the same request split.",
+    )
+    parser.add_argument(
+        "--comparison-output",
+        type=Path,
+        default=ROOT / "docs" / "metrics" / "mind_lgb_objective_comparison.json",
+    )
     args = parser.parse_args()
     started = time.perf_counter()
 
@@ -502,18 +726,22 @@ def main() -> None:
         update_counts=False,
     )
     feature_columns = list(RANKER_FEATURE_COLUMNS)
+    lgb_common_params = {
+        "n_estimators": args.lgb_estimators,
+        "learning_rate": 0.05,
+        "num_leaves": 31,
+        "min_child_samples": 50,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "random_state": 42,
+        "verbosity": -1,
+    }
+    classifier_config = {
+        "objective": "binary",
+        **lgb_common_params,
+    }
     lgb_started = time.perf_counter()
-    classifier = lgb.LGBMClassifier(
-        objective="binary",
-        n_estimators=args.lgb_estimators,
-        learning_rate=0.05,
-        num_leaves=31,
-        min_child_samples=50,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42,
-        verbosity=-1,
-    )
+    classifier = lgb.LGBMClassifier(**classifier_config)
     classifier.fit(train_features[feature_columns], train_features["label"])
     lgb_duration = time.perf_counter() - lgb_started
     probabilities = classifier.predict_proba(test_features[feature_columns])[:, 1]
@@ -525,6 +753,29 @@ def main() -> None:
         ),
         "log_loss": round(float(log_loss(test_features["label"], probabilities)), 6),
     }
+    ranker_config: dict[str, Any] | None = None
+    ranker_duration: float | None = None
+    ranker_scores: np.ndarray | None = None
+    train_group_sizes: list[int] = []
+    test_group_sizes: list[int] = []
+    comparison: dict[str, Any] | None = None
+    if args.compare_lgb_objectives:
+        train_group_sizes = _request_group_sizes(train_features)
+        test_group_sizes = _request_group_sizes(test_features)
+        ranker_config = {
+            "objective": "lambdarank",
+            "metric": "ndcg",
+            **lgb_common_params,
+        }
+        ranker_started = time.perf_counter()
+        ranker = lgb.LGBMRanker(**ranker_config)
+        ranker.fit(
+            train_features[feature_columns],
+            train_features["label"],
+            group=train_group_sizes,
+        )
+        ranker_duration = time.perf_counter() - ranker_started
+        ranker_scores = ranker.predict(test_features[feature_columns])
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     model_path = args.output_dir / "lgb_ranker_v1.txt"
@@ -598,6 +849,113 @@ def main() -> None:
             article_category,
         ),
     }
+    if (
+        ranker_scores is not None
+        and ranker_config is not None
+        and ranker_duration is not None
+    ):
+        ranker_ranking = _ranking_metrics(
+            test_features,
+            ranker_scores,
+            article_category,
+        )
+        pointwise_ranking = arms["lightgbm"]
+        if ranker_ranking["requests"] != pointwise_ranking["requests"]:
+            raise RuntimeError("Objective comparison evaluated different request counts")
+        pointwise_metrics = {
+            metric: float(pointwise_ranking[metric]) for metric in COMPARISON_RANKING_METRICS
+        }
+        lambdarank_metrics = {
+            metric: float(ranker_ranking[metric]) for metric in COMPARISON_RANKING_METRICS
+        }
+        metric_deltas = {
+            metric: round(lambdarank_metrics[metric] - pointwise_metrics[metric], 6)
+            for metric in COMPARISON_RANKING_METRICS
+        }
+        pointwise_request_metrics = _request_ranking_metric_frame(
+            test_features,
+            probabilities,
+            article_category,
+        )
+        lambdarank_request_metrics = _request_ranking_metric_frame(
+            test_features,
+            ranker_scores,
+            article_category,
+        )
+        for metric in COMPARISON_RANKING_METRICS:
+            if round(float(pointwise_request_metrics[metric].mean()), 6) != pointwise_metrics[
+                metric
+            ]:
+                raise RuntimeError(f"Pointwise per-request {metric} does not match aggregate")
+            if round(float(lambdarank_request_metrics[metric].mean()), 6) != lambdarank_metrics[
+                metric
+            ]:
+                raise RuntimeError(f"LambdaRank per-request {metric} does not match aggregate")
+        bootstrap = _paired_bootstrap_confidence_intervals(
+            pointwise_request_metrics,
+            lambdarank_request_metrics,
+        )
+        comparison = {
+            "dataset": "MIND-small",
+            "normalized_fingerprint": normalized_manifest["normalized_fingerprint"],
+            "data_fingerprint": data_fingerprint,
+            "split": {
+                "strategy": "global chronological request holdout inside train",
+                "train_ratio": args.train_ratio,
+                "training_cutoff_ts": cutoff_ts,
+                "all_train_requests": len(train_ids),
+                "all_test_requests": len(test_ids),
+                "sampled_train_requests": len(sampled_train_ids),
+                "sampled_test_requests": len(sampled_test_ids),
+            },
+            "feature_schema": {
+                "version": FEATURE_SCHEMA_VERSION,
+                "columns": feature_columns,
+            },
+            "samples": {
+                "train_rows": len(train_features),
+                "test_rows": len(test_features),
+                "train_request_groups": len(train_group_sizes),
+                "test_request_groups": len(test_group_sizes),
+                "train_group_rows": sum(train_group_sizes),
+                "test_group_rows": sum(test_group_sizes),
+            },
+            "models": {
+                "pointwise_classifier": {
+                    "class": "LGBMClassifier",
+                    "config": classifier_config,
+                    "training_seconds": round(lgb_duration, 3),
+                },
+                "lambdarank": {
+                    "class": "LGBMRanker",
+                    "config": ranker_config,
+                    "training_seconds": round(ranker_duration, 3),
+                },
+            },
+            "ranking_metrics": {
+                "pointwise_classifier": {
+                    "requests": int(pointwise_ranking["requests"]),
+                    **pointwise_metrics,
+                },
+                "lambdarank": {
+                    "requests": int(ranker_ranking["requests"]),
+                    **lambdarank_metrics,
+                },
+            },
+            "delta_lambdarank_minus_pointwise": metric_deltas,
+            "paired_bootstrap": bootstrap,
+            "interpretation": _comparison_interpretation(metric_deltas, bootstrap),
+            "comparison_contract": {
+                "same_train_features": True,
+                "same_test_features": True,
+                "same_feature_columns": True,
+                "same_sampled_requests": True,
+                "shared_hyperparameters": lgb_common_params,
+                "test_used_for_training_or_tuning": False,
+                "lambdarank_score_semantics": "ranking score, not calibrated click probability",
+            },
+        }
+
     candidate_recall, known_request_coverage = _candidate_recall(
         test_features,
         model,
@@ -713,10 +1071,18 @@ def main() -> None:
         json.dumps(metrics, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    if comparison is not None:
+        args.comparison_output.parent.mkdir(parents=True, exist_ok=True)
+        args.comparison_output.write_text(
+            json.dumps(comparison, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     print(
         f"wrote {args.metrics_output}; Recall@10={ml_recall:.6f}; "
         f"known coverage={known_request_coverage:.4f}"
     )
+    if comparison is not None:
+        print(f"wrote {args.comparison_output}")
 
 
 if __name__ == "__main__":

@@ -3,9 +3,16 @@ from __future__ import annotations
 from collections import Counter
 
 import pandas as pd
+import pytest
 
 from backend.app.repositories.ranker import build_feature_dict
-from scripts.train_eval_mind import _build_features, _request_split
+from scripts.train_eval_mind import (
+    COMPARISON_RANKING_METRICS,
+    _build_features,
+    _paired_bootstrap_confidence_intervals,
+    _request_group_sizes,
+    _request_split,
+)
 
 
 def test_global_request_split_keeps_equal_timestamp_requests_together():
@@ -23,6 +30,55 @@ def test_global_request_split_keeps_equal_timestamp_requests_together():
     assert cutoff == 20
     assert set(train["request_id"]) == {"a"}
     assert set(test["request_id"]) == {"b", "c", "d"}
+
+
+def test_request_group_sizes_preserve_contiguous_request_order():
+    frame = pd.DataFrame({"request_id": ["a", "a", "b", "c", "c", "c"]})
+
+    assert _request_group_sizes(frame) == [2, 1, 3]
+
+
+def test_request_group_sizes_reject_non_contiguous_requests():
+    frame = pd.DataFrame({"request_id": ["a", "a", "b", "a"]})
+
+    with pytest.raises(ValueError, match="multiple non-contiguous groups"):
+        _request_group_sizes(frame)
+
+
+def test_request_group_sizes_preserve_total_row_count():
+    frame = pd.DataFrame({"request_id": ["a", "b", "b", "c"]})
+
+    assert sum(_request_group_sizes(frame)) == len(frame)
+
+
+def test_paired_bootstrap_confidence_intervals_pair_by_request_id():
+    pointwise = pd.DataFrame(
+        [
+            {"request_id": request_id, **dict.fromkeys(COMPARISON_RANKING_METRICS, 0.0)}
+            for request_id in ("a", "b", "c")
+        ]
+    )
+    lambdarank = pd.DataFrame(
+        [
+            {"request_id": request_id, **dict.fromkeys(COMPARISON_RANKING_METRICS, 1.0)}
+            for request_id in ("c", "a", "b")
+        ]
+    )
+
+    bootstrap = _paired_bootstrap_confidence_intervals(
+        pointwise,
+        lambdarank,
+        iterations=20,
+    )
+
+    assert bootstrap["request_pairs"] == 3
+    for interval in bootstrap["delta_intervals"].values():
+        assert interval == {
+            "mean_delta": 1.0,
+            "lower_bound": 1.0,
+            "upper_bound": 1.0,
+            "stable_direction": "increase",
+        }
 
 
 def test_mind_features_use_only_prior_item_counts():

@@ -1,0 +1,225 @@
+{
+  "comparison_contract": {
+    "lambdarank_score_semantics": "ranking score, not calibrated click probability",
+    "same_feature_columns": true,
+    "same_sampled_requests": true,
+    "same_test_features": true,
+    "same_train_features": true,
+    "shared_hyperparameters": {
+      "colsample_bytree": 0.8,
+      "learning_rate": 0.05,
+      "min_child_samples": 50,
+      "n_estimators": 120,
+      "num_leaves": 31,
+      "random_state": 42,
+      "subsample": 0.8,
+      "verbosity": -1
+    },
+    "test_used_for_training_or_tuning": false
+  },
+  "data_fingerprint": "31b385095325f70428c02181db974ccafeb30e2a3fd5d8402c1cb17181666c12",
+  "dataset": "MIND-small",
+  "delta_lambdarank_minus_pointwise": {
+    "category_diversity@10": -0.3486,
+    "mrr": 0.001629,
+    "ndcg@10": 0.000542,
+    "ndcg@5": 0.003525,
+    "recall@10": -0.002525,
+    "recall@5": 0.006123
+  },
+  "feature_schema": {
+    "columns": [
+      "base_score",
+      "personalized_topic_score",
+      "default_topic_score",
+      "topic_match_score",
+      "query_recall_boost",
+      "user_behavior_score",
+      "user_topic_count",
+      "article_hot_score",
+      "article_click_count",
+      "article_impression_count",
+      "article_age_hours",
+      "article_has_picture",
+      "article_has_video",
+      "article_is_high_value",
+      "article_is_editor_recommended",
+      "source_is_preferred"
+    ],
+    "version": 4
+  },
+  "interpretation": {
+    "conclusion": "The paired NDCG@10 interval includes zero, so this experiment does not establish a stable winner under the fixed configuration.",
+    "deployment_implication": "Keep the online artifact unchanged; these scores are offline ranking evidence and LambdaRank output is not a calibrated click probability.",
+    "primary_metric": "ndcg@10",
+    "primary_observed_delta": 0.000542,
+    "primary_paired_interval": [
+      -0.002928,
+      0.003905
+    ],
+    "primary_stable_direction": "not_established",
+    "tradeoffs": {
+      "category_diversity@10": {
+        "observed_delta": -0.3486,
+        "observed_direction": "decrease",
+        "paired_interval": [
+          -0.367,
+          -0.331298
+        ],
+        "stable_direction": "decrease"
+      },
+      "mrr": {
+        "observed_delta": 0.001629,
+        "observed_direction": "increase",
+        "paired_interval": [
+          -0.002655,
+          0.005811
+        ],
+        "stable_direction": "not_established"
+      },
+      "ndcg@5": {
+        "observed_delta": 0.003525,
+        "observed_direction": "increase",
+        "paired_interval": [
+          -0.000361,
+          0.007299
+        ],
+        "stable_direction": "not_established"
+      },
+      "recall@10": {
+        "observed_delta": -0.002525,
+        "observed_direction": "decrease",
+        "paired_interval": [
+          -0.007969,
+          0.00294
+        ],
+        "stable_direction": "not_established"
+      },
+      "recall@5": {
+        "observed_delta": 0.006123,
+        "observed_direction": "increase",
+        "paired_interval": [
+          0.000734,
+          0.01173
+        ],
+        "stable_direction": "increase"
+      }
+    }
+  },
+  "models": {
+    "lambdarank": {
+      "class": "LGBMRanker",
+      "config": {
+        "colsample_bytree": 0.8,
+        "learning_rate": 0.05,
+        "metric": "ndcg",
+        "min_child_samples": 50,
+        "n_estimators": 120,
+        "num_leaves": 31,
+        "objective": "lambdarank",
+        "random_state": 42,
+        "subsample": 0.8,
+        "verbosity": -1
+      },
+      "training_seconds": 1.467
+    },
+    "pointwise_classifier": {
+      "class": "LGBMClassifier",
+      "config": {
+        "colsample_bytree": 0.8,
+        "learning_rate": 0.05,
+        "min_child_samples": 50,
+        "n_estimators": 120,
+        "num_leaves": 31,
+        "objective": "binary",
+        "random_state": 42,
+        "subsample": 0.8,
+        "verbosity": -1
+      },
+      "training_seconds": 1.31
+    }
+  },
+  "normalized_fingerprint": "643c53b0ce5fddf5e08a8d6f8e491ddec607a3f56c335c44d872e6e74cbd4b52",
+  "paired_bootstrap": {
+    "confidence_level": 0.95,
+    "delta_intervals": {
+      "category_diversity@10": {
+        "lower_bound": -0.367,
+        "mean_delta": -0.3486,
+        "stable_direction": "decrease",
+        "upper_bound": -0.331298
+      },
+      "mrr": {
+        "lower_bound": -0.002655,
+        "mean_delta": 0.001629,
+        "stable_direction": "not_established",
+        "upper_bound": 0.005811
+      },
+      "ndcg@10": {
+        "lower_bound": -0.002928,
+        "mean_delta": 0.000542,
+        "stable_direction": "not_established",
+        "upper_bound": 0.003905
+      },
+      "ndcg@5": {
+        "lower_bound": -0.000361,
+        "mean_delta": 0.003525,
+        "stable_direction": "not_established",
+        "upper_bound": 0.007299
+      },
+      "recall@10": {
+        "lower_bound": -0.007969,
+        "mean_delta": -0.002525,
+        "stable_direction": "not_established",
+        "upper_bound": 0.00294
+      },
+      "recall@5": {
+        "lower_bound": 0.000734,
+        "mean_delta": 0.006123,
+        "stable_direction": "increase",
+        "upper_bound": 0.01173
+      }
+    },
+    "iterations": 2000,
+    "method": "paired nonparametric bootstrap over requests",
+    "request_pairs": 10000,
+    "seed": 42
+  },
+  "ranking_metrics": {
+    "lambdarank": {
+      "category_diversity@10": 4.0748,
+      "mrr": 0.331162,
+      "ndcg@10": 0.363497,
+      "ndcg@5": 0.3052,
+      "recall@10": 0.594341,
+      "recall@5": 0.427401,
+      "requests": 10000
+    },
+    "pointwise_classifier": {
+      "category_diversity@10": 4.4234,
+      "mrr": 0.329533,
+      "ndcg@10": 0.362955,
+      "ndcg@5": 0.301675,
+      "recall@10": 0.596866,
+      "recall@5": 0.421278,
+      "requests": 10000
+    }
+  },
+  "samples": {
+    "test_group_rows": 421431,
+    "test_request_groups": 10000,
+    "test_rows": 421431,
+    "train_group_rows": 753687,
+    "train_request_groups": 20000,
+    "train_rows": 753687
+  },
+  "split": {
+    "all_test_requests": 31393,
+    "all_train_requests": 125572,
+    "sampled_test_requests": 10000,
+    "sampled_train_requests": 20000,
+    "strategy": "global chronological request holdout inside train",
+    "train_ratio": 0.8,
+    "training_cutoff_ts": 1573677386
+  }
+}
